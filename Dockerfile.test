@@ -1,0 +1,14 @@
+FROM python:3
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+RUN rm requirements.txt
+
+COPY bluetti_bt_connect_lib ./bluetti_bt_connect_lib
+COPY tests ./tests
+
+RUN python3 -m unittest discover -s tests -p "*.py"
+RUN python3 -m unittest discover -s tests/fields -p "*.py"
+RUN python3 -m unittest discover -s tests/registers -p "*.py"
+RUN python3 -m unittest discover -s tests/base_devices -p "*.py"
+RUN python3 -m unittest discover -s tests/devices -p "*.py"
