@@ -1,0 +1,121 @@
+name: Publish to PyPI
+
+# Publishing is what lets the Home Assistant integration pin a real version.
+# With a bare git URL requirement, Home Assistant can only check whether a
+# package of that name is installed - never whether it is current - so it
+# silently keeps running whatever it installed first. A pinned PyPI version
+# gives it something to compare against, and upgrades start working on their
+# own.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish - must match __version__ in the package"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          for suite in tests tests/fields tests/registers tests/base_devices tests/devices; do
+            [ -d "$suite" ] || continue
+            echo "::group::$suite"
+            python -m unittest discover -s "$suite" -p "*.py"
+            echo "::endgroup::"
+          done
+
+  build:
+    name: Build distributions
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag that disagrees with the packaged __version__ would publish a
+      # release whose metadata contradicts its own source. Refuse instead.
+      - name: Resolve and verify version
+        id: resolve
+        run: |
+          REQUESTED="${{ github.event.release.tag_name || inputs.version }}"
+          REQUESTED="${REQUESTED#v}"
+          PACKAGED="$(python -c "import re, pathlib; print(re.search(r'^__version__\s*=\s*[\"\']([^\"\']+)', pathlib.Path('bluetti_bt_connect_lib/__init__.py').read_text(), re.M).group(1))")"
+
+          echo "requested: $REQUESTED"
+          echo "packaged : $PACKAGED"
+
+          if [ -z "$REQUESTED" ]; then
+            echo "::error::No version supplied"
+            exit 1
+          fi
+
+          if [ "$REQUESTED" != "$PACKAGED" ]; then
+            echo "::error::Tag $REQUESTED does not match __version__ $PACKAGED - bump bluetti_bt_connect_lib/__init__.py before tagging"
+            exit 1
+          fi
+
+          echo "version=$PACKAGED" >> "$GITHUB_OUTPUT"
+
+      - name: Build sdist and wheel
+        env:
+          LIB_VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI verifies this workflow's OIDC identity, so no
+    # API token is stored anywhere. Configure the publisher once at
+    # https://pypi.org/manage/project/bluetti-bt-connect-lib/settings/publishing/
+    # (repository Ellmondo/bluetti-bt-connect-lib, workflow publish.yml,
+    # environment pypi).
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bluetti-bt-connect-lib
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
