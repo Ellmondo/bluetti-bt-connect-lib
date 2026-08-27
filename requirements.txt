@@ -1,6 +1,10 @@
+# Runtime dependencies. Kept in step with install_requires in setup.py.
+#
+# asyncio and logging used to be listed here. Both are standard library - the
+# PyPI packages of those names are an empty placeholder and a Python 2 relic
+# respectively, and installing them achieves nothing.
 async_timeout
-asyncio
 bleak
 bleak_retry_connector
 crcmod
-logging
+typing_extensions; python_version < "3.12"

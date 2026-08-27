@@ -2,6 +2,7 @@
 
 import os
 import codecs
+import re
 from setuptools import setup, find_packages
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -9,7 +10,30 @@ here = os.path.abspath(os.path.dirname(__file__))
 with codecs.open(os.path.join(here, "README.md"), encoding="utf-8") as fh:
     long_description = "\n" + fh.read()
 
-VERSION = os.getenv("LIB_VERSION")
+
+def read_version() -> str:
+    """Read __version__ out of the package without importing it.
+
+    Importing would pull in bleak and friends, which are not necessarily
+    installed while the package is being built.
+    """
+    init = os.path.join(here, "bluetti_bt_connect_lib", "__init__.py")
+    with codecs.open(init, encoding="utf-8") as handle:
+        match = re.search(
+            r'^__version__\s*=\s*["\']([^"\']+)["\']', handle.read(), re.MULTILINE
+        )
+
+    if match is None:
+        raise RuntimeError("Could not find __version__ in bluetti_bt_connect_lib")
+
+    return match.group(1)
+
+
+# The release workflow sets LIB_VERSION from the git tag. Falling back to the
+# in-package __version__ means an install straight from git still reports a
+# real version - without it setuptools substitutes 0.0.0, which leaves Home
+# Assistant unable to tell a stale copy from a current one.
+VERSION = os.getenv("LIB_VERSION") or read_version()
 DESCRIPTION = "Bluetti BT Connect - Bluetooth library for Bluetti power stations (fork of bluetti-bt-lib by Patrick762)"
 
 # Setting up
@@ -17,19 +41,25 @@ setup(
     name="bluetti-bt-connect-lib",
     version=VERSION,
     author="Ellmondo",
-    author_email="<CHANGE_ME@example.com>",  # TODO: replace with your contact email
     description=DESCRIPTION,
     long_description_content_type="text/markdown",
     long_description=long_description,
     url="https://github.com/Ellmondo/bluetti-bt-connect-lib",
-    packages=find_packages(),
+    packages=find_packages(exclude=["tests", "tests.*"]),
+    python_requires=">=3.11",
+    # asyncio and logging were listed here but are both standard library. On
+    # PyPI they resolve to unrelated packages: "asyncio" is a placeholder whose
+    # own description says not to install it, and "logging" is the Python 2
+    # original from 2004, which drops a top-level logging/ package into
+    # site-packages. Neither belongs in a dependency list.
     install_requires=[
         "async_timeout",
-        "asyncio",
         "bleak",
         "bleak_retry_connector",
         "crcmod",
-        "logging",
+        # utils.bleak_client_mock needs collections.abc.Buffer, which only
+        # exists from 3.12 onwards.
+        'typing_extensions; python_version < "3.12"',
     ],
     keywords=[],
     entry_points={
