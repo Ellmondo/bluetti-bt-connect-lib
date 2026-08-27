@@ -1,4 +1,5 @@
 import struct
+from typing import List
 
 from . import DeviceRegister, RegisterAction
 
@@ -10,6 +11,15 @@ class ReadableRegisters(DeviceRegister):
         )
         self.starting_address = starting_address
         self.quantity = quantity
+
+        self.members: List["ReadableRegisters"] = []
+        """The individual per-field reads this request was merged from.
+
+        Empty for an atomic read. Populated only when several nearby field
+        reads were combined into one larger request, so that a caller can
+        fall back to reading them one at a time if the device rejects the
+        combined range.
+        """
 
     def response_size(self):
         # 3 byte header

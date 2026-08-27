@@ -106,25 +106,7 @@ class DeviceReader:
                     self.logger.debug("Notification handler setup complete")
 
                     for register in registers:
-                        body = register.parse_response(
-                            await self._async_send_command(register)
-                        )
-
-                        self.logger.debug("Raw data: %s", body)
-
-                        if raw:
-                            d = {}
-                            d[register.starting_address] = body
-                            parsed_data.update(d)
-                            continue
-
-                        parsed = self.bluetti_device.parse(
-                            register.starting_address, body
-                        )
-
-                        self.logger.debug("Parsed data: %s", parsed)
-
-                        parsed_data.update(parsed)
+                        parsed_data.update(await self._read_registers(register, raw))
 
                     for pack in range(1, self.bluetti_device.max_packs + 1):
                         # Selecting a pack is a write - it returns no register
@@ -137,27 +119,9 @@ class DeviceReader:
                         await asyncio.sleep(3)
 
                         for register in pack_registers:
-                            body = register.parse_response(
-                                await self._async_send_command(register)
+                            parsed_data.update(
+                                await self._read_registers(register, raw, pack_num=pack)
                             )
-
-                            self.logger.debug("Raw data: %s", body)
-
-                            if raw:
-                                d = {}
-                                d[register.starting_address] = body
-                                parsed_data.update(d)
-                                continue
-
-                            parsed = self.bluetti_device.parse(
-                                register.starting_address,
-                                body,
-                                pack_num=pack,
-                            )
-
-                            self.logger.debug("Parsed data: %s", parsed)
-
-                            parsed_data.update(parsed)
 
             except TimeoutError:
                 self.logger.warning("Timeout")
@@ -185,6 +149,79 @@ class DeviceReader:
                 return None
 
             return parsed_data
+
+    @property
+    def is_connected(self) -> bool:
+        """Whether a live GATT connection is currently held open."""
+        return self.client is not None and getattr(self.client, "is_connected", False)
+
+    async def _read_registers(
+        self,
+        register: ReadableRegisters,
+        raw: bool,
+        pack_num: int | None = None,
+    ) -> dict:
+        """Read one register request, falling back to its members on failure.
+
+        A merged request spans the unused registers between the fields it
+        covers, so a single address the device refuses to serve can make it
+        reject the whole range. When that happens, read the individual fields
+        the request was merged from one at a time, so one bad register only
+        costs its own field rather than every field grouped with it.
+        """
+
+        response = await self._async_send_command(register)
+
+        if response:
+            return self._parse_registers(register, response, raw, pack_num)
+
+        # An atomic read has nothing to fall back to.
+        if len(register.members) <= 1:
+            return {}
+
+        self.logger.debug(
+            "Grouped read %s was rejected - falling back to %d individual reads",
+            register,
+            len(register.members),
+        )
+
+        parsed_data: dict = {}
+
+        for member in register.members:
+            member_response = await self._async_send_command(member)
+
+            if not member_response:
+                continue
+
+            parsed_data.update(
+                self._parse_registers(member, member_response, raw, pack_num)
+            )
+
+        return parsed_data
+
+    def _parse_registers(
+        self,
+        register: ReadableRegisters,
+        response: bytes,
+        raw: bool,
+        pack_num: int | None = None,
+    ) -> dict:
+        """Turn one register response into parsed field values."""
+
+        body = register.parse_response(response)
+
+        self.logger.debug("Raw data: %s", body)
+
+        if raw:
+            return {register.starting_address: body}
+
+        parsed = self.bluetti_device.parse(
+            register.starting_address, body, pack_num=pack_num
+        )
+
+        self.logger.debug("Parsed data: %s", parsed)
+
+        return parsed
 
     async def _async_send_command(self, registers: DeviceRegister) -> bytes:
         """Send command and return response"""
