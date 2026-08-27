@@ -12,6 +12,7 @@ class BaseDeviceV1(BluettiDevice):
         additional_fields: List[DeviceField] = [],
         pack_fields: List[DeviceField] = [],
         max_packs: int = 0,
+        **kwargs,
     ):
         super().__init__(
             [
@@ -26,6 +27,7 @@ class BaseDeviceV1(BluettiDevice):
             + additional_fields,
             pack_fields,
             max_packs,
+            **kwargs,
         )
 
     def get_full_registers_range(self) -> List[ReadableRegisters]:

@@ -10,6 +10,7 @@ from bluetti_bt_connect_lib.fields import (
     SerialNumberField,
     FieldName,
     SwitchField,
+    UIntField,
 )
 from bluetti_bt_connect_lib.registers import ReadableRegisters
 
@@ -168,3 +169,99 @@ class TestBluettiDevice(unittest.TestCase):
 
         self.assertEqual(len(device.get_select_fields()), 1)
         self.assertEqual(len(device.get_sensor_fields()), 1)
+
+    def test_nearby_fields_are_grouped(self):
+        fields = [
+            UIntField(FieldName.AC_P1_POWER, 100),
+            UIntField(FieldName.AC_P2_POWER, 104),
+            UIntField(FieldName.AC_P3_POWER, 108),
+        ]
+
+        device = BluettiDevice(fields=fields, max_register_gap=8)
+
+        registers = device.get_polling_registers()
+
+        self.assertEqual(len(registers), 1)
+        self.assertEqual(registers[0].starting_address, 100)
+        self.assertEqual(registers[0].quantity, 9)
+
+        # The group remembers what it replaced, so a rejected read can fall
+        # back to reading each field on its own.
+        self.assertEqual(len(registers[0].members), 3)
+        self.assertEqual(
+            [m.starting_address for m in registers[0].members], [100, 104, 108]
+        )
+
+    def test_distant_fields_are_not_grouped(self):
+        fields = [
+            UIntField(FieldName.AC_P1_POWER, 100),
+            UIntField(FieldName.AC_P2_POWER, 200),
+        ]
+
+        device = BluettiDevice(fields=fields, max_register_gap=8)
+
+        registers = device.get_polling_registers()
+
+        self.assertEqual(len(registers), 2)
+        # An ungrouped read is atomic and has nothing to fall back to.
+        self.assertEqual(registers[0].members, [])
+        self.assertEqual(registers[1].members, [])
+
+    def test_grouping_respects_max_quantity(self):
+        fields = [UIntField(FieldName.AC_P1_POWER, 100 + i) for i in range(20)]
+
+        device = BluettiDevice(
+            fields=fields, max_register_gap=8, max_register_quantity=8
+        )
+
+        registers = device.get_polling_registers()
+
+        self.assertTrue(len(registers) > 1)
+        for register in registers:
+            self.assertLessEqual(register.quantity, 8)
+
+    def test_grouping_can_be_disabled(self):
+        fields = [
+            UIntField(FieldName.AC_P1_POWER, 100),
+            UIntField(FieldName.AC_P2_POWER, 104),
+            UIntField(FieldName.AC_P3_POWER, 108),
+        ]
+
+        device = BluettiDevice(fields=fields, max_register_gap=None)
+
+        registers = device.get_polling_registers()
+
+        self.assertEqual(len(registers), 3)
+        self.assertEqual([r.starting_address for r in registers], [100, 104, 108])
+
+    def test_grouping_covers_overlapping_fields(self):
+        fields = [
+            StringField(FieldName.DEVICE_TYPE, 100, 6),
+            UIntField(FieldName.AC_P1_POWER, 102),
+        ]
+
+        device = BluettiDevice(fields=fields, max_register_gap=8)
+
+        registers = device.get_polling_registers()
+
+        self.assertEqual(len(registers), 1)
+        self.assertEqual(registers[0].starting_address, 100)
+        # The wider field already covers the narrower one - the group must
+        # not shrink to end at the last field's address.
+        self.assertEqual(registers[0].quantity, 6)
+
+    def test_pack_fields_are_grouped(self):
+        pack_fields = [
+            UIntField(FieldName.PACK_BATTERY_SOC, 300),
+            UIntField(FieldName.PACK_SOH, 302),
+        ]
+
+        device = BluettiDevice(
+            fields=[], pack_fields=pack_fields, max_packs=2, max_register_gap=8
+        )
+
+        registers = device.get_pack_polling_registers()
+
+        self.assertEqual(len(registers), 1)
+        self.assertEqual(registers[0].starting_address, 300)
+        self.assertEqual(registers[0].quantity, 3)

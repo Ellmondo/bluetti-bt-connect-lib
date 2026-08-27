@@ -12,40 +12,118 @@ from ..fields import (
 )
 
 
+DEFAULT_MAX_REGISTER_GAP = 8
+"""How many unused registers may sit between two fields before they are read
+separately rather than merged into one request.
+
+Field addresses cluster tightly, so merging across small gaps collapses a
+large number of round trips into a handful at the cost of transferring a few
+extra words per poll. BLE round trips dominate poll time by a wide margin, so
+this trade is heavily worth making."""
+
+DEFAULT_MAX_REGISTER_QUANTITY = 32
+"""Largest number of registers to request in a single read.
+
+Kept well below the Modbus ceiling of 125 so a merged response stays small
+enough to be reassembled comfortably from BLE notification fragments."""
+
+
 class BluettiDevice:
     def __init__(
         self,
         fields: List[DeviceField],
         pack_fields: List[DeviceField] = [],
         max_packs: int = 0,
+        max_register_gap: int | None = DEFAULT_MAX_REGISTER_GAP,
+        max_register_quantity: int = DEFAULT_MAX_REGISTER_QUANTITY,
     ):
         self.fields = fields
         self.pack_fields = pack_fields
         self.max_packs = max_packs
+        self.max_register_gap = max_register_gap
+        self.max_register_quantity = max_register_quantity
 
         self.fields.sort(key=lambda f: f.address)
         self.pack_fields.sort(key=lambda f: f.address)
 
-        self.polling_registers: List[ReadableRegisters] = []
+        # Write-only fields (e.g. password/unlock fields) are never included
+        # in regular polling - there's no need to continuously re-read them.
+        self.polling_registers: List[ReadableRegisters] = self._group_registers(
+            [f for f in self.fields if not isinstance(f, WriteableStringField)]
+        )
         self.pack_polling_registers: List[ReadableRegisters] = []
-
-        for f in self.fields:
-            # Write-only fields (e.g. password/unlock fields) are never
-            # included in regular polling - there's no need to continuously
-            # re-read them.
-            if isinstance(f, WriteableStringField):
-                continue
-            group = ReadableRegisters(f.address, f.size)
-            self.polling_registers.append(group)
 
         # Check if we even have battery pack fields defined
         if len(self.pack_fields) == 0 or max_packs == 0:
             return
 
-        # Optimize amount of registers to separately request
-        for f in self.pack_fields:
-            group = ReadableRegisters(f.address, f.size)
-            self.pack_polling_registers.append(group)
+        self.pack_polling_registers = self._group_registers(self.pack_fields)
+
+    def _group_registers(self, fields: List[DeviceField]) -> List[ReadableRegisters]:
+        """Merge nearby field reads into a smaller number of requests.
+
+        Reading each field with its own request costs one BLE round trip per
+        field, which dominates the time a poll takes. Fields whose addresses
+        sit within `max_register_gap` of each other are read together in one
+        request instead, up to `max_register_quantity` registers.
+
+        Merged requests keep a list of the individual reads they replaced, so
+        a caller can retry them one at a time if the device rejects the wider
+        range (see `DeviceReader._read_registers`). Setting `max_register_gap`
+        to None disables merging entirely and restores one request per field.
+        """
+
+        if len(fields) == 0:
+            return []
+
+        singles = [
+            ReadableRegisters(f.address, f.size)
+            for f in sorted(fields, key=lambda f: f.address)
+        ]
+
+        if self.max_register_gap is None:
+            return singles
+
+        groups: List[ReadableRegisters] = []
+        members = [singles[0]]
+        start = singles[0].starting_address
+        end = start + singles[0].quantity
+
+        for register in singles[1:]:
+            register_end = register.starting_address + register.quantity
+
+            # Fields can overlap (two fields reading the same words), in
+            # which case the gap is negative and the merge is free.
+            gap = register.starting_address - end
+            quantity = register_end - start
+
+            if gap <= self.max_register_gap and quantity <= self.max_register_quantity:
+                members.append(register)
+                end = max(end, register_end)
+                continue
+
+            groups.append(self._build_group(start, end, members))
+            members = [register]
+            start = register.starting_address
+            end = register_end
+
+        groups.append(self._build_group(start, end, members))
+
+        return groups
+
+    @staticmethod
+    def _build_group(
+        start: int, end: int, members: List[ReadableRegisters]
+    ) -> ReadableRegisters:
+        """Build one request covering `members`, or return it unchanged."""
+
+        if len(members) == 1:
+            return members[0]
+
+        group = ReadableRegisters(start, end - start)
+        group.members = members
+
+        return group
 
     def get_polling_registers(self) -> List[ReadableRegisters]:
         """Returns all registers required to poll device fields"""
