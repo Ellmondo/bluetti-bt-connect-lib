@@ -127,10 +127,10 @@ class DeviceReader:
                         parsed_data.update(parsed)
 
                     for pack in range(1, self.bluetti_device.max_packs + 1):
-                        body = register.parse_response(
-                            await self._async_send_command(
-                                self.bluetti_device.get_pack_selector(pack),
-                            )
+                        # Selecting a pack is a write - it returns no register
+                        # data of its own, so there is nothing here to parse.
+                        await self._async_send_command(
+                            self.bluetti_device.get_pack_selector(pack),
                         )
 
                         # We need to wait for the powerstation to populate all registers
