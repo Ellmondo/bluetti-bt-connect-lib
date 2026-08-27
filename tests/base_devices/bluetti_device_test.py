@@ -250,6 +250,32 @@ class TestBluettiDevice(unittest.TestCase):
         # not shrink to end at the last field's address.
         self.assertEqual(registers[0].quantity, 6)
 
+    def test_pack_fields_are_ignored_outside_a_pack_read(self):
+        # A merged request can span a pack field's address. Outside a pack
+        # read that field must not surface, or it lands under its bare name.
+        fields = [UIntField(FieldName.AC_P1_POWER, 100)]
+        pack_fields = [UIntField(FieldName.PACK_BATTERY_SOC, 102)]
+
+        device = BluettiDevice(fields=fields, pack_fields=pack_fields, max_packs=2)
+
+        parsed = device.parse(starting_address=100, data=b"\x00\x0b\x00\x00\x00\x2a")
+
+        self.assertEqual(parsed.get(FieldName.AC_P1_POWER.value), 11)
+        self.assertNotIn(FieldName.PACK_BATTERY_SOC.value, parsed)
+
+    def test_pack_fields_are_returned_during_a_pack_read(self):
+        fields = [UIntField(FieldName.AC_P1_POWER, 100)]
+        pack_fields = [UIntField(FieldName.PACK_BATTERY_SOC, 102)]
+
+        device = BluettiDevice(fields=fields, pack_fields=pack_fields, max_packs=2)
+
+        parsed = device.parse(
+            starting_address=100, data=b"\x00\x0b\x00\x00\x00\x2a", pack_num=1
+        )
+
+        self.assertEqual(parsed.get(FieldName.AC_P1_POWER.value), 11)
+        self.assertEqual(parsed.get(f"pack_1_{FieldName.PACK_BATTERY_SOC.value}"), 42)
+
     def test_pack_fields_are_grouped(self):
         pack_fields = [
             UIntField(FieldName.PACK_BATTERY_SOC, 300),

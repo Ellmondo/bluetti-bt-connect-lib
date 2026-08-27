@@ -162,12 +162,17 @@ class BluettiDevice:
         # need to divide the byte size by 2
         data_size = int(len(data) / 2)
 
+        # Pack fields are only meaningful while a pack is selected. Outside a
+        # pack read they must not be considered at all: a merged request can
+        # span a pack field's address, and matching it here would emit it
+        # under its bare name - or, where a pack field and a regular field
+        # share a name, silently overwrite the real value.
+        candidates = self.fields if pack_num is None else self.fields + self.pack_fields
+
         # Filter out fields not in range
         r = range(starting_address, starting_address + data_size)
         fields = [
-            f
-            for f in (self.fields + self.pack_fields)
-            if f.address in r and f.address + f.size - 1 in r
+            f for f in candidates if f.address in r and f.address + f.size - 1 in r
         ]
 
         # Parse fields
