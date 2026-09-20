@@ -1,6 +1,6 @@
 """Bluetti BT Lib exports."""
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 """Single source of truth for the package version.
 
 setup.py reads this when LIB_VERSION is not set, so an install straight from
@@ -10,10 +10,13 @@ workflow checks the git tag against it and refuses to publish on a mismatch.
 
 from .base_devices import BluettiDevice
 from .bluetooth import (
+    DeviceConnection,
     DeviceReader,
     DeviceReaderConfig,
     DeviceWriter,
     DeviceRecognizerResult,
+    WriteOutcome,
+    WriteResult,
     recognize_device,
 )
 from .enums import *

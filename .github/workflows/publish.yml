@@ -41,7 +41,7 @@ jobs:
 
       - name: Run tests
         run: |
-          for suite in tests tests/fields tests/registers tests/base_devices tests/devices; do
+          for suite in tests tests/fields tests/registers tests/base_devices tests/bluetooth tests/devices; do
             [ -d "$suite" ] || continue
             echo "::group::$suite"
             python -m unittest discover -s "$suite" -p "*.py"

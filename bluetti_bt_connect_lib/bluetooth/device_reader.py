@@ -8,17 +8,33 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from ..base_devices import BluettiDevice
 from ..const import NOTIFY_UUID, WRITE_UUID
-from ..registers import ReadableRegisters, DeviceRegister
+from ..registers import ReadableRegisters, DeviceRegister, WriteableRegister
 from ..exceptions import ModbusError, ParseError
 from ..utils.privacy import mac_loggable
+from .device_connection import DeviceConnection
+from .write_result import WriteResult, WriteOutcome
 
 
 class DeviceReaderConfig:
-    def __init__(self, timeout: int = 60, use_encryption: bool = False):
+    def __init__(
+        self,
+        timeout: int = 60,
+        use_encryption: bool = False,
+        keep_alive_seconds: float = 0,
+    ):
         self.timeout = timeout
         self.use_encryption = use_encryption
         # Encryption support was removed; kept only so callers that pass
         # this positionally (e.g. the coordinator) keep working. No effect.
+
+        self.keep_alive_seconds = keep_alive_seconds
+        """How long to hold a shared connection open after a conversation.
+
+        Only meaningful when a DeviceConnection is supplied. Zero disconnects
+        immediately, matching the old behaviour. A value comfortably longer
+        than the polling interval keeps the link up between polls, removing
+        connection setup from every cycle. Negative holds it indefinitely.
+        """
 
 
 class DeviceReader:
@@ -30,6 +46,7 @@ class DeviceReader:
         config: DeviceReaderConfig = DeviceReaderConfig(),
         lock: asyncio.Lock = asyncio.Lock(),
         ble_client: BleakClient | None = None,
+        connection: DeviceConnection | None = None,
     ):
         self.mac = mac
         self.bluetti_device = bluetti_device
@@ -39,6 +56,18 @@ class DeviceReader:
 
         self.ble_client = ble_client
         """Used for unittests"""
+
+        self.connection = connection
+        """A connection shared with anything else that talks to this device.
+
+        When supplied, the reader borrows it instead of opening its own link,
+        and leaves it open afterwards for `keep_alive_seconds`. That is what
+        lets a write and its confirmation share a session, and stops a write
+        from tearing down a connection a poll is using.
+
+        When None the reader behaves exactly as before: connect, read,
+        disconnect.
+        """
 
         self.logger = logging.getLogger(
             f"{__name__}.{mac_loggable(mac).replace(':', '_')}"
@@ -51,6 +80,10 @@ class DeviceReader:
         self.current_registers = None
         self.notify_response = bytearray()
         self.notify_future: asyncio.Future[Any] | None = None
+
+        self.last_exception_code: int | None = None
+        """Exception code from the most recent command, if the device refused
+        it. Cleared at the start of every command."""
 
     async def read(
         self, only_registers: List[ReadableRegisters] | None = None, raw: bool = False
@@ -70,40 +103,8 @@ class DeviceReader:
         async with self.polling_lock:
             try:
                 async with async_timeout.timeout(self.config.timeout):
-                    self.logger.debug("Searching for device")
-
-                    if self.ble_client:
-                        self.device = None
-                    else:
-                        self.device = await BleakScanner.find_device_by_address(
-                            self.mac, timeout=5
-                        )
-
-                        if self.device is None:
-                            self.logger.error("Device not found")
-                            return
-
-                    self.logger.debug("Connecting to device")
-
-                    if self.ble_client:
-                        self.client = self.ble_client
-                    else:
-                        self.client = await establish_connection(
-                            BleakClientWithServiceCache,
-                            self.device,
-                            self.device.name or "Unknown Device",
-                            max_attempts=10,
-                        )
-
-                    self.logger.debug("Connected to device")
-
-                    if not self.has_notifier:
-                        await self.client.start_notify(
-                            NOTIFY_UUID, self._notification_handler
-                        )
-                        self.has_notifier = True
-
-                    self.logger.debug("Notification handler setup complete")
+                    if not await self._open():
+                        return None
 
                     for register in registers:
                         parsed_data.update(await self._read_registers(register, raw))
@@ -133,27 +134,191 @@ class DeviceReader:
                 self.logger.warning("Unknown error %s", err)
                 return None
             finally:
-                if self.has_notifier:
-                    try:
-                        await self.client.stop_notify(NOTIFY_UUID)
-                        self.logger.debug("Stopped notifier")
-                    except:
-                        # Ignore errors here
-                        pass
-                    self.has_notifier = False
-                if self.client:
-                    await self.client.disconnect()
-                    self.logger.debug("Disconnected from device")
+                await self._close()
 
             if not parsed_data:
                 return None
 
             return parsed_data
 
+    async def write(self, field: str, value: Any) -> WriteResult:
+        """Write one field and report what the device said about it.
+
+        The Modbus write function answers every request - echoing the value
+        on success, or returning an exception frame with a reason. Sending a
+        write and disconnecting without reading that answer, which is what
+        DeviceWriter does, discards the only trustworthy signal about whether
+        a setting actually took.
+
+        This sends the write on the same connection and notification handler
+        the reader already uses, so the answer arrives where it can be seen.
+        """
+
+        known = [f.name for f in self.bluetti_device.fields]
+
+        if field not in known:
+            self.logger.error("Field not supported: %s", field)
+            return WriteResult(
+                WriteOutcome.FAILED, field, value, detail="field not supported"
+            )
+
+        command = self.bluetti_device.build_write_command(field, value)
+
+        if command is None:
+            self.logger.error("Field is not writeable: %s", field)
+            return WriteResult(
+                WriteOutcome.FAILED, field, value, detail="field is not writeable"
+            )
+
+        async with self.polling_lock:
+            try:
+                async with async_timeout.timeout(self.config.timeout):
+                    if not await self._open():
+                        return WriteResult(
+                            WriteOutcome.FAILED, field, value, detail="not connected"
+                        )
+
+                    self.logger.debug("Writing %s = %s", field, value)
+
+                    response = await self._async_send_command(command)
+
+                    return self._interpret_write(field, value, command, response)
+            except (TimeoutError, asyncio.TimeoutError):
+                self.logger.warning("Timeout writing %s", field)
+                return WriteResult(WriteOutcome.NO_RESPONSE, field, value)
+            except BleakError as err:
+                self.logger.warning("Bleak error writing %s: %s", field, err)
+                return WriteResult(
+                    WriteOutcome.FAILED, field, value, detail=f"bleak error: {err}"
+                )
+            except BaseException as err:
+                self.logger.warning("Unknown error writing %s: %s", field, err)
+                return WriteResult(
+                    WriteOutcome.FAILED, field, value, detail=str(err)
+                )
+            finally:
+                await self._close()
+
+    def _interpret_write(
+        self, field: str, value: Any, command: DeviceRegister, response: bytes
+    ) -> WriteResult:
+        """Turn a raw write response into a verdict."""
+
+        # _async_send_command swallows Modbus exceptions and returns empty
+        # bytes, having already recorded the code.
+        if not response:
+            code = self.last_exception_code
+
+            if code is not None:
+                result = WriteResult(
+                    WriteOutcome.REFUSED, field, value, exception_code=code
+                )
+                self.logger.warning("Write refused - %s", result)
+                return result
+
+            self.logger.warning("No response writing %s", field)
+            return WriteResult(WriteOutcome.NO_RESPONSE, field, value)
+
+        if isinstance(command, WriteableRegister):
+            echoed = int.from_bytes(command.parse_response(response), "big")
+
+            if echoed == command.value:
+                self.logger.debug("Write accepted: %s = %s", field, echoed)
+                return WriteResult(
+                    WriteOutcome.ACCEPTED, field, value, echoed=echoed
+                )
+
+            result = WriteResult(
+                WriteOutcome.MISMATCHED, field, value, echoed=echoed
+            )
+            self.logger.warning("%s", result)
+            return result
+
+        # Multi-register writes echo address and quantity rather than a value,
+        # so a well-formed response is the whole confirmation available.
+        self.logger.debug("Multi-register write acknowledged: %s", field)
+        return WriteResult(WriteOutcome.ACCEPTED, field, value)
+
     @property
     def is_connected(self) -> bool:
         """Whether a live GATT connection is currently held open."""
+        if self.connection is not None:
+            return self.connection.is_connected
+
         return self.client is not None and getattr(self.client, "is_connected", False)
+
+    async def _open(self) -> bool:
+        """Get a usable client and notification subscription."""
+
+        if self.connection is not None:
+            if not await self.connection.ensure_connected():
+                self.logger.error("Shared connection unavailable")
+                return False
+
+            self.client = self.connection.client
+            self.connection.set_data_callback(self._handle_data)
+            self.connection.set_disconnect_callback(self._abandon_pending)
+            self.logger.debug("Using shared connection")
+            return True
+
+        self.logger.debug("Searching for device")
+
+        if self.ble_client:
+            self.device = None
+            self.client = self.ble_client
+        else:
+            self.device = await BleakScanner.find_device_by_address(
+                self.mac, timeout=5
+            )
+
+            if self.device is None:
+                self.logger.error("Device not found")
+                return False
+
+            self.logger.debug("Connecting to device")
+            self.client = await establish_connection(
+                BleakClientWithServiceCache,
+                self.device,
+                self.device.name or "Unknown Device",
+                max_attempts=10,
+            )
+
+        self.logger.debug("Connected to device")
+
+        if not self.has_notifier:
+            await self.client.start_notify(NOTIFY_UUID, self._notification_handler)
+            self.has_notifier = True
+            self.logger.debug("Notification handler setup complete")
+
+        return True
+
+    async def _close(self) -> None:
+        """Release the connection, or hand it back if it is shared."""
+
+        if self.connection is not None:
+            self.connection.clear_data_callback()
+            self.connection.set_disconnect_callback(None)
+            self.connection.schedule_disconnect(self.config.keep_alive_seconds)
+            return
+
+        if self.has_notifier:
+            try:
+                await self.client.stop_notify(NOTIFY_UUID)
+                self.logger.debug("Stopped notifier")
+            except Exception:
+                pass
+            self.has_notifier = False
+
+        if self.client:
+            await self.client.disconnect()
+            self.logger.debug("Disconnected from device")
+
+    def _abandon_pending(self) -> None:
+        """Fail a waiting command when the link drops underneath it."""
+        if self.notify_future is not None and not self.notify_future.done():
+            self.notify_future.set_exception(
+                BleakError("Disconnected while awaiting a response")
+            )
 
     async def _read_registers(
         self,
@@ -228,6 +393,7 @@ class DeviceReader:
         self.current_registers = registers
         self.notify_response = bytearray()
         self.notify_future = self.create_future()
+        self.last_exception_code = None
 
         command_bytes = bytes(registers)
 
@@ -259,7 +425,15 @@ class DeviceReader:
         return bytes()
 
     async def _notification_handler(self, _: int, data: bytearray):
-        """Handle bt data."""
+        """Notification callback for a connection this reader owns."""
+        self._handle_data(bytes(data))
+
+    def _handle_data(self, data: bytes) -> None:
+        """Accumulate a response and resolve the waiting command.
+
+        Reached either directly from bleak on a standalone connection, or
+        from DeviceConnection when the link is shared. Identical either way.
+        """
         self.logger.debug("Got new data (%d bytes)", len(data))
 
         self.notify_response.extend(data)
@@ -280,9 +454,20 @@ class DeviceReader:
         ) != expected_size and self.current_registers.is_exception_response(
             self.notify_response
         ):
+            # Byte 2 carries the reason the device refused. Keep it: for a
+            # write it is the difference between "out of range" and "the
+            # device will not let you set this", and it is the only place
+            # that distinction is ever stated.
+            if len(self.notify_response) >= 3:
+                self.last_exception_code = self.notify_response[2]
+
             self.notify_future.set_exception(
                 ModbusError(
-                    f"Device returned a Modbus exception response for {self.current_registers}"
+                    f"Device returned a Modbus exception response for "
+                    f"{self.current_registers} "
+                    f"(code 0x{self.last_exception_code:02x})"
+                    if self.last_exception_code is not None
+                    else f"Device returned a Modbus exception response for {self.current_registers}"
                 )
             )
             return
