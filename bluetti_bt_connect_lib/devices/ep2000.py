@@ -146,32 +146,6 @@ class EP2000(BaseDeviceV2):
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
                 UIntField(FieldName.TOTAL_NODE_COUNT, 21001),
-
-                # --- Diagnostics -------------------------------------
-                # Registers named by Bluetti's own per-device map. Plain
-                # read-only fields: we want to see the values, not act on
-                # them.
-                #
-                # 2005 SetCtrlWorkMode - expected 1 custom, 2 self use,
-                #      4 backup, 5 save. If it reads one of those, Working
-                #      Mode is solved.
-                # 2013 SetCtrlPowerOn - read raw to confirm it behaves like
-                #      a power flag rather than a mode, which is the
-                #      evidence for having removed the select above.
-                # 2073 remoteSet / 2074 remoteSetSoc - never polled by this
-                #      project or either upstream one. The name suggests a
-                #      remote-control enable, which would make 2073 the
-                #      best candidate yet for whatever decides that a write
-                #      is honoured rather than quietly reverted. Watch
-                #      whether it changes when the Bluetti app connects.
-                # Duplicates the Working Mode select above, deliberately:
-                # the select shows the decoded name, this shows the raw
-                # number. Useful while we confirm writes land; remove
-                # once Working Mode is trusted.
-                UIntField(FieldName.DIAG_SET_CTRL_WORK_MODE, 2005),
-                UIntField(FieldName.DIAG_SET_CTRL_POWER_ON, 2013),
-                UIntField(FieldName.DIAG_REMOTE_SET, 2073),
-                UIntField(FieldName.DIAG_REMOTE_SET_SOC, 2074),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),

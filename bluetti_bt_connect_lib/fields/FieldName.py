@@ -129,14 +129,3 @@ class FieldName(Enum):
     BATTERY_STACK_COUNT = "battery_stack_count"
     TOTAL_NODE_COUNT = "total_node_count"
     ACTIVE_CELL_COUNT = "active_cell_count"
-
-    # Diagnostics. Read-only observations of registers that Bluetti's own
-    # per-device register map names, taken from the protobuf blob their
-    # official integration feeds to its compiled library. We have never
-    # polled most of these, and one of them we have been calling something
-    # else entirely. Nothing here is writable - the point is to find out
-    # what these registers actually hold before deciding what they are.
-    DIAG_SET_CTRL_WORK_MODE = "diag_set_ctrl_work_mode"
-    DIAG_SET_CTRL_POWER_ON = "diag_set_ctrl_power_on"
-    DIAG_REMOTE_SET = "diag_remote_set"
-    DIAG_REMOTE_SET_SOC = "diag_remote_set_soc"
