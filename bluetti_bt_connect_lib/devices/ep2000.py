@@ -1,5 +1,4 @@
 from ..base_devices import BaseDeviceV2
-from ..enums import WorkingMode
 from ..fields import (
     FieldName,
     UIntField,
@@ -12,7 +11,6 @@ from ..fields import (
     SwitchField,
     BoolField,
     WriteableUIntField,
-    SelectField,
 )
 
 
@@ -78,11 +76,18 @@ class EP2000(BaseDeviceV2):
                 # found about grid/mode writes on this device before
                 # relying on any control below.
                 SwitchField(FieldName.CTRL_AC, 2011),
-                # Register from an EP2000-specific contributor source; enum
-                # values cross-referenced from a related device (AP300,
-                # register 2005 there) - the set of names matches exactly
-                # what's shown in the app's Working Mode dropdown.
-                SelectField(FieldName.WORKING_MODE, 2013, WorkingMode),
+                # Working Mode select removed. It wrote to 2013, and
+                # Bluetti's own register map for this unit
+                # (EBOX2531000319426) names 2013 SetCtrlPowerOn - the
+                # device power control. Selecting a mode would have written
+                # a mode number to a power on/off register. It read a
+                # constant 0 and never matched the enum, which is why
+                # nothing has gone wrong so far.
+                #
+                # Bluetti puts Working Mode at 2005, which the AP300
+                # evidence in Patrick762/bluetti-bt-lib#61 also pointed at.
+                # It is read below as a diagnostic first; it does not come
+                # back as a control until we have watched it behave.
                 UIntField(FieldName.BATTERY_SOC_RANGE_START, 2022),
                 UIntField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders
@@ -143,6 +148,28 @@ class EP2000(BaseDeviceV2):
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
                 UIntField(FieldName.TOTAL_NODE_COUNT, 21001),
+
+                # --- Diagnostics -------------------------------------
+                # Registers named by Bluetti's own per-device map. Plain
+                # read-only fields: we want to see the values, not act on
+                # them.
+                #
+                # 2005 SetCtrlWorkMode - expected 1 custom, 2 self use,
+                #      4 backup, 5 save. If it reads one of those, Working
+                #      Mode is solved.
+                # 2013 SetCtrlPowerOn - read raw to confirm it behaves like
+                #      a power flag rather than a mode, which is the
+                #      evidence for having removed the select above.
+                # 2073 remoteSet / 2074 remoteSetSoc - never polled by this
+                #      project or either upstream one. The name suggests a
+                #      remote-control enable, which would make 2073 the
+                #      best candidate yet for whatever decides that a write
+                #      is honoured rather than quietly reverted. Watch
+                #      whether it changes when the Bluetti app connects.
+                UIntField(FieldName.DIAG_SET_CTRL_WORK_MODE, 2005),
+                UIntField(FieldName.DIAG_SET_CTRL_POWER_ON, 2013),
+                UIntField(FieldName.DIAG_REMOTE_SET, 2073),
+                UIntField(FieldName.DIAG_REMOTE_SET_SOC, 2074),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),
