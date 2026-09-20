@@ -1,0 +1,4 @@
+# local scratch / secrets (do not commit)
+.bt-token
+*.bin
+__pycache__/
