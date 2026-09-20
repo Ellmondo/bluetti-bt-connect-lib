@@ -1,4 +1,5 @@
 from ..base_devices import BaseDeviceV2
+from ..enums import WorkingMode
 from ..fields import (
     FieldName,
     UIntField,
@@ -9,6 +10,7 @@ from ..fields import (
     SerialNumberField,
     VersionField,
     SwitchField,
+    SelectField,
     BoolField,
     WriteableUIntField,
 )
@@ -76,18 +78,14 @@ class EP2000(BaseDeviceV2):
                 # found about grid/mode writes on this device before
                 # relying on any control below.
                 SwitchField(FieldName.CTRL_AC, 2011),
-                # Working Mode select removed. It wrote to 2013, and
-                # Bluetti's own register map for this unit
-                # (EBOX2531000319426) names 2013 SetCtrlPowerOn - the
-                # device power control. Selecting a mode would have written
-                # a mode number to a power on/off register. It read a
-                # constant 0 and never matched the enum, which is why
-                # nothing has gone wrong so far.
-                #
-                # Bluetti puts Working Mode at 2005, which the AP300
-                # evidence in Patrick762/bluetti-bt-lib#61 also pointed at.
-                # It is read below as a diagnostic first; it does not come
-                # back as a control until we have watched it behave.
+                # Working Mode. 2005, not 2013 - 2013 is SetCtrlPowerOn,
+                # the device power control, and a mode number written there
+                # would have been a power command. Confirmed two ways that
+                # agree exactly: this register reads 1, and Bluetti's cloud
+                # reports SetCtrlWorkMode = workmode_3 for this device,
+                # which their own mapping ties to register value 1. The
+                # enum below was always right; only the address was wrong.
+                SelectField(FieldName.WORKING_MODE, 2005, WorkingMode),
                 UIntField(FieldName.BATTERY_SOC_RANGE_START, 2022),
                 UIntField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders
@@ -166,6 +164,10 @@ class EP2000(BaseDeviceV2):
                 #      best candidate yet for whatever decides that a write
                 #      is honoured rather than quietly reverted. Watch
                 #      whether it changes when the Bluetti app connects.
+                # Duplicates the Working Mode select above, deliberately:
+                # the select shows the decoded name, this shows the raw
+                # number. Useful while we confirm writes land; remove
+                # once Working Mode is trusted.
                 UIntField(FieldName.DIAG_SET_CTRL_WORK_MODE, 2005),
                 UIntField(FieldName.DIAG_SET_CTRL_POWER_ON, 2013),
                 UIntField(FieldName.DIAG_REMOTE_SET, 2073),
