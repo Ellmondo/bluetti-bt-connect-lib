@@ -10,6 +10,7 @@ from ..fields import (
     SerialNumberField,
     VersionField,
     SwitchField,
+    ValueSwitchField,
     SelectField,
     BoolField,
     WriteableUIntField,
@@ -86,6 +87,14 @@ class EP2000(BaseDeviceV2):
                 # which their own mapping ties to register value 1. The
                 # enum below was always right; only the address was wrong.
                 SelectField(FieldName.WORKING_MODE, 2005, WorkingMode),
+                # AI/EMS control mode (register 2241). 8 = Bluetti AI/EMS
+                # actively managing the system, which OVERWRITES manual
+                # writes (grid limits, working mode) - the accept-then-
+                # revert we chased for weeks. 0 = manual control, and
+                # manual writes then persist. Confirmed on hardware:
+                # plain write reverts with 2241=8, persists with 2241=0.
+                # Turn this OFF to make manual settings stick.
+                ValueSwitchField(FieldName.EMS_CONTROL, 2241, on_value=8, off_value=0),
                 UIntField(FieldName.BATTERY_SOC_RANGE_START, 2022),
                 UIntField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders

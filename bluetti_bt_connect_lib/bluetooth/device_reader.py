@@ -13,7 +13,6 @@ from ..exceptions import ModbusError, ParseError
 from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
-from .unlock import build_unlock_command
 
 
 class DeviceReaderConfig:
@@ -22,7 +21,6 @@ class DeviceReaderConfig:
         timeout: int = 60,
         use_encryption: bool = False,
         keep_alive_seconds: float = 0,
-        unlock_password: str | None = None,
     ):
         self.timeout = timeout
         self.use_encryption = use_encryption
@@ -38,17 +36,6 @@ class DeviceReaderConfig:
         connection setup from every cycle. Negative holds it indefinitely.
         """
 
-        self.unlock_password = unlock_password
-        """Bluetooth settings password to authenticate the session before a
-        write, or None to skip authentication.
-
-        When set (including the empty string, which is the correct unlock for a
-        unit with no password), every write first sends this password to
-        register 7 (Modbus function 16) in the same session, which is what the
-        official app does before touching protected settings. Protected writes
-        (grid limits, working mode, expert params) are echoed but silently
-        reverted until this authentication happens. None reproduces the old
-        behaviour of writing without authenticating."""
 
 
 class DeviceReader:
@@ -192,15 +179,6 @@ class DeviceReader:
                             WriteOutcome.FAILED, field, value, detail="not connected"
                         )
 
-                    if self.config.unlock_password is not None:
-                        unlock = await self._send_unlock(self.config.unlock_password)
-                        if not unlock.accepted:
-                            self.logger.warning(
-                                "Session unlock not accepted (%s) - the write "
-                                "may not persist",
-                                unlock,
-                            )
-
                     self.logger.debug("Writing %s = %s", field, value)
 
                     response = await self._async_send_command(command)
@@ -221,47 +199,6 @@ class DeviceReader:
                 )
             finally:
                 await self._close()
-
-    async def unlock(self, password: str | None) -> WriteResult:
-        """Authenticate a session on its own, opening and closing the link.
-
-        Useful for testing the unlock in isolation. During normal use the
-        write path calls the unlock internally (see ``unlock_password`` on
-        the config) so it shares one session with the protected write.
-        """
-        async with self.polling_lock:
-            try:
-                async with async_timeout.timeout(self.config.timeout):
-                    if not await self._open():
-                        return WriteResult(
-                            WriteOutcome.FAILED, "unlock", password,
-                            detail="not connected",
-                        )
-                    return await self._send_unlock(password)
-            except (TimeoutError, asyncio.TimeoutError):
-                return WriteResult(WriteOutcome.NO_RESPONSE, "unlock", password)
-            except BleakError as err:
-                return WriteResult(
-                    WriteOutcome.FAILED, "unlock", password,
-                    detail=f"bleak error: {err}",
-                )
-            except BaseException as err:
-                return WriteResult(
-                    WriteOutcome.FAILED, "unlock", password, detail=str(err)
-                )
-            finally:
-                await self._close()
-
-    async def _send_unlock(self, password: str | None) -> WriteResult:
-        """Send the register-7 password write on an already-open session.
-
-        Assumes the caller holds the polling lock and the connection is open,
-        so the unlock and the write that follows share one session.
-        """
-        command = build_unlock_command(password)
-        self.logger.debug("Unlocking session via register 7")
-        response = await self._async_send_command(command)
-        return self._interpret_write("unlock", password, command, response)
 
     def _interpret_write(
         self, field: str, value: Any, command: DeviceRegister, response: bytes

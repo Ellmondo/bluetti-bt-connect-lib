@@ -15,6 +15,7 @@ from .StringField import *
 from .WriteableStringField import *
 from .SwapStringField import *
 from .SwitchField import *
+from .ValueSwitchField import *
 from .UIntField import *
 from .WriteableUIntField import *
 from .VersionField import *

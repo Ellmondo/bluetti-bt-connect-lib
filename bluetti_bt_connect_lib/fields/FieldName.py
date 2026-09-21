@@ -26,6 +26,7 @@ class FieldName(Enum):
     MAX_GRID_EXPORT_POWER = "max_grid_export_power"
     MAX_GRID_EXPORT_CURRENT = "max_grid_export_current"
     WORKING_MODE = "working_mode"
+    EMS_CONTROL = "ems_control"
     MAX_GRID_IMPORT_POWER = "max_grid_import_power"
     CTRL_GRID_MAX_CURRENT = "ctrl_grid_max_current"
     BATTERY_SOC = "total_battery_percent"

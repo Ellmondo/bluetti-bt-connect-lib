@@ -6,6 +6,7 @@ from ..fields import (
     BoolField,
     BoolFieldNonZero,
     SwitchField,
+    ValueSwitchField,
     SelectField,
     WriteableStringField,
     WriteableUIntField,
@@ -208,7 +209,9 @@ class BluettiDevice:
             return WriteableRegisters(field.address, registers)
 
         # Convert value to an integer if its not already
-        if isinstance(field, SelectField):
+        if isinstance(field, ValueSwitchField):
+            value = field.on_value if value else field.off_value
+        elif isinstance(field, SelectField):
             if not isinstance(value, int):
                 value = field.e[value].value
         elif isinstance(field, SwitchField):
