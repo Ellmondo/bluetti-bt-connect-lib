@@ -12,21 +12,43 @@ Core functions based on https://github.com/warhammerkid/bluetti_mqtt
 ## Disclaimer
 This library is provided without any warranty or support by Bluetti. I do not take responsibility for any problems it may cause in all cases. Use it at your own risk.
 
-## ⚠️ EP2000: grid/mode controls carry real risk - read before using
+## ✅ EP2000: full local write control (v2.0)
 
-**AC Output, Charge From Grid, Grid Export, Working Mode, and all four grid import/export power and current limits remain writable in this build.** Before you rely on any of them, please understand what we found while investigating this device.
+Earlier versions of this fork carried a long warning that grid and working-mode
+writes were accepted by the device and then silently reverted, and speculated it
+was a cloud/authentication or "Pro Mode" gate. **That is solved as of v2.0**, and
+the cause turned out to be mundane: this is a 2nd-generation IoT device whose
+authoritative settings controller sits on **Modbus slave 0**, while the inverter
+answers on **slave 1**. The fork was writing to slave 1 - the inverter echoed the
+write and then overwrote it within a few seconds from the slave-0 setpoint.
+Writing to slave 0 makes the change persist. This matches the official Bluetti
+app, which sends settings to slave 0 on this device class; the few-second delay
+you may notice before a change shows up is the value propagating back to the
+slave-1 reading (the same delay the app shows before it opens its settings
+screen).
 
-**The core problem:** writes into this device's grid-related register block can get a clean, protocol-valid acknowledgment from the device - and then the change does not actually take effect. This was confirmed at the raw byte level, ruling out a simple wrong-address or scaling issue. In practice this means: **you may set a limit in Home Assistant, see it accepted with no error, and the device may still be running on its old setting.** Nothing in the app or the integration will reliably tell you a write didn't stick - the failure is silent. Do not assume a control has taken effect on the device just because Home Assistant shows no error; if you change one of these settings, verify the result independently (in the Bluetti app, or against real grid behavior) before relying on it.
+**What this means on the EP2000 now:**
 
-**Update (v1.7.0) - the mechanism, more precisely.** Further investigation narrowed this down. A BLE write is not lost, it is *staged*: it applies only when the official Bluetti app's settings screen initialises, which triggers a commit to the device over the vendor's cloud/MQTT channel. A change made while the app is already open does not apply until the app is closed and reopened. This was confirmed against Bluetti's own per-device register map (pulled from their cloud) and verified with a live oracle - our BLE read of a register agreeing exactly with the value their cloud API reports. It means the practical workaround is real: set a value in Home Assistant, then open the Bluetti app to flush it. It also means **Working Mode now writes to register 2005** (this release), which is where Bluetti actually places it - the previous mapping used 2013, which is the device *power on/off* control, so selecting a mode there was issuing a power command. Cloud control of Working Mode and Power does work in Bluetti's own official Home Assistant integration; grid import/export limits are not exposed on that cloud channel at all and remain reachable only through the app.
+- **Grid export power/current, grid import power/current, working mode, AC
+  output, charge-from-grid and grid-export enables all write and persist** over
+  local BLE. Give a write a few seconds to settle before trusting the read-back.
+- A new **AI Control Mode** switch exposes register 2241. When Bluetti's AI/EMS
+  is on it actively manages the system and will override your manual settings
+  (the old "accept-then-revert" you would then see). Leave it **off** for manual
+  control; the switch lets you see and change that state from Home Assistant.
 
-**Why we believe this happens:** a research pass across comparable BLE-connected solar/battery projects (EcoFlow, Renogy, Growatt, Deye/Sunsynk, Anker SOLIX, Marstek, several open-source BMS forks) found that grid-facing settings - export/import limits, working mode, grid protection - are consistently gated behind some form of vendor authentication across the entire industry, not just on Bluetti hardware: a cloud-account round-trip, a licensed BLE encryption handshake keyed to the device's serial number, or a support-issued password. The EP2000 fits this pattern - there's a genuine "Pro Mode" authentication layer here, and while we confirmed the universal technician password Bluetti documents publicly ("88888888"), simply knowing that password did not make writes persist, which points at a session or encryption-level gate underneath it that hasn't been reverse-engineered.
+**Still worth knowing:**
 
-**Why we haven't removed these controls outright:** unlike the grid-compliance layer itself, some of these fields (notably the AC Output and Grid Export switches, and Max Grid Export Current) were live-tested and confirmed to actually take effect on this specific unit at various points during development. Reliability may vary by field, by firmware version, and possibly by unit - which is exactly why blanket trust in any of them is the wrong approach. Treat every write as unverified until you've checked its real-world effect yourself.
+- **Grid export and grid-protection parameters are regulated for interconnection
+  safety in most jurisdictions** (anti-islanding, voltage/frequency ride-through).
+  Whether or not a write persists, changing them may carry real compliance
+  implications depending on where you live and how your system is connected.
+- Reliability can still vary by firmware version and by unit. This is confirmed
+  on an EP2000 + EBOX; if a control misbehaves on your setup, the standalone BLE
+  diagnostics below will show you exactly what the device is doing.
 
-**Grid export and grid-protection parameters are regulated for interconnection safety in most jurisdictions** (anti-islanding, voltage/frequency ride-through). Changing them, even successfully, may have real compliance implications depending on where you live and how your system is set up. This is worth knowing regardless of whether a given write actually persists.
-
-**If you're an advanced user or researcher**: the full research writeup and the exact register-level evidence behind the above are referenced in this version's release notes. The realistic next step for confirming or defeating the authentication gate isn't more register-guessing - it's capturing the official app's authenticated write sequence directly (Android Bluetooth HCI snoop log, or hooking the app's write call with Frida).
+Full technical detail - the investigation and the register-level evidence - is in
+the v2.0 release notes (`RELEASE_NOTES_2.0.0.md`).
 
 ## Projects using this library
 
@@ -44,7 +66,7 @@ Validated
 |AC180      |✅                   |✅            |✅            |✅             |✅             |
 |EB3A       |✅                   |✅            |✅            |✅             |✅             |
 |EP600      |✅                   |PV            |Grid          |❌             |AC Phases      |
-|EP2000     |✅                   |PV            |Grid          |❌             |AC Phases, writable grid/mode fields (⚠️ see warning above)|
+|EP2000     |✅                   |PV            |Grid          |❌             |AC Phases; writable grid import/export + working mode, persist via slave 0 (see v2.0 notes)|
 |Handsfree 1|✅                   |✅            |✅            |✅             |✅             |
 
 Added and mostly validated by contributors (some are moved here from the HA Integration https://github.com/Patrick762/hassio-bluetti-bt):
@@ -211,6 +233,32 @@ Example:
 ```bash
 bluetti-write -m 00:00:00:00:00:00 -t EB3A --on on ctrl_ac
 ```
+
+## Standalone BLE diagnostics (repo scripts)
+
+These live at the repo root and are self-contained (raw Modbus over the GATT
+write characteristic - no library import needed). They were written while
+diagnosing the slave-0 write behaviour and are kept for future debugging. Run
+them from a venv that has `bleak`, `bleak-retry-connector` and `crcmod`
+installed, with the device free (turn off any "Hold Bluetooth connection" switch
+in Home Assistant first so the station is not already connected).
+
+- `scan_addr.py` - list nearby BLE devices and their addresses (on macOS the
+  address is a CoreBluetooth UUID).
+- `probe_grid.py` - dump the grid import/export registers at both slaves, sweep
+  nearby, and optionally test that an import write persists (`--test-import N`).
+- `probe_slave.py` - A/B a write at slave 0 vs slave 1 with read-back (this is
+  the one that pinned down the fix).
+- `probe_writepath.py` - test write strategies (EMS on/off, slave, commit pulse).
+- `probe_commit.py` - write a value, then watch it for ~45s to catch a slow
+  revert and test commit pulses.
+
+```bash
+python probe_grid.py --mac <address>
+python probe_slave.py --mac <address> --reg 2215 --value 1500
+```
+
+Get `<address>` from `scan_addr.py` or `bluetti-scan`.
 
 ## Adding fields
 
