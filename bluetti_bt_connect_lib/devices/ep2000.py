@@ -128,8 +128,8 @@ class EP2000(BaseDeviceV2):
                 # 6600, exactly matching "Single-phase Grid Max. Input
                 # Power: 6600 W" in the Bluetti app. Bound set to that
                 # confirmed real value.
-                WriteableUIntField(FieldName.MAX_GRID_IMPORT_POWER, 2213, min=0, max=6600),
-                WriteableUIntField(FieldName.CTRL_GRID_MAX_CURRENT, 2214, min=0, max=40),
+                WriteableUIntField(FieldName.MAX_GRID_IMPORT_POWER, 2213, min=0, max=9600),
+                WriteableUIntField(FieldName.CTRL_GRID_MAX_CURRENT, 2214, min=0, max=50),
                 # CTRL_GRID_INPUT_CURRENT (was register 2272) removed -
                 # history showed it only ever reports unavailable or 0
                 # across its entire recorded lifetime, and
