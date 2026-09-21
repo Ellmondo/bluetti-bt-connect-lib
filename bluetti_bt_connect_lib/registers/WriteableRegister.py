@@ -4,8 +4,8 @@ from . import DeviceRegister, RegisterAction
 
 
 class WriteableRegister(DeviceRegister):
-    def __init__(self, address: int, value: int):
-        super().__init__(RegisterAction.WRITE, struct.pack("!HH", address, value))
+    def __init__(self, address: int, value: int, slave: int = 1):
+        super().__init__(RegisterAction.WRITE, struct.pack("!HH", address, value), slave)
         self.address = address
         self.value = value
 

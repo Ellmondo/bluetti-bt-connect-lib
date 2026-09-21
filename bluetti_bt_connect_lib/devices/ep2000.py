@@ -165,4 +165,9 @@ class EP2000(BaseDeviceV2):
                 VersionField(FieldName.PACK_VER_HV_MOD, 6184),
             ],
             # max_packs=2,
+            # Writes go to slave 0: this is a 2nd-gen IoT device whose
+            # settings controller is on slave 0. A write to slave 1 is
+            # echoed by the inverter and then overwritten by the slave-0
+            # setpoint within a few seconds (confirmed on hardware).
+            write_slave_addr=0,
         )

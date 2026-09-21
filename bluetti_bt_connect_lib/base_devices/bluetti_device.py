@@ -37,12 +37,18 @@ class BluettiDevice:
         max_packs: int = 0,
         max_register_gap: int | None = DEFAULT_MAX_REGISTER_GAP,
         max_register_quantity: int = DEFAULT_MAX_REGISTER_QUANTITY,
+        write_slave_addr: int = 1,
     ):
         self.fields = fields
         self.pack_fields = pack_fields
         self.max_packs = max_packs
         self.max_register_gap = max_register_gap
         self.max_register_quantity = max_register_quantity
+        self.write_slave_addr = write_slave_addr
+        """Modbus slave address to send WRITES to. Reads use slave 1, but on
+        2nd-generation IoT devices the authoritative settings controller is
+        slave 0 - a write to slave 1 is echoed by the inverter and then
+        overwritten by the slave-0 setpoint. Set to 0 for those devices."""
 
         self.fields.sort(key=lambda f: f.address)
         self.pack_fields.sort(key=lambda f: f.address)
@@ -206,7 +212,7 @@ class BluettiDevice:
 
         if isinstance(field, WriteableStringField):
             registers = field.encode_for_write(value)
-            return WriteableRegisters(field.address, registers)
+            return WriteableRegisters(field.address, registers, self.write_slave_addr)
 
         # Convert value to an integer if its not already
         if isinstance(field, ValueSwitchField):
@@ -217,7 +223,7 @@ class BluettiDevice:
         elif isinstance(field, SwitchField):
             value = 1 if value else 0
 
-        return WriteableRegister(field.address, value)
+        return WriteableRegister(field.address, value, self.write_slave_addr)
 
     def get_bool_fields(self):
         """Returns all bool fields for this device"""

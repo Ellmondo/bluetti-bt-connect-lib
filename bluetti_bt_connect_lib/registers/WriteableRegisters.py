@@ -16,7 +16,7 @@ class WriteableRegisters(DeviceRegister):
       register values (byte count bytes)
     """
 
-    def __init__(self, address: int, values: list[int]):
+    def __init__(self, address: int, values: list[int], slave: int = 1):
         quantity = len(values)
         byte_count = quantity * 2
 
@@ -24,7 +24,7 @@ class WriteableRegisters(DeviceRegister):
         for v in values:
             body += struct.pack("!H", v)
 
-        super().__init__(RegisterAction.WRITE_MULTIPLE, body)
+        super().__init__(RegisterAction.WRITE_MULTIPLE, body, slave)
         self.address = address
         self.values = values
 
