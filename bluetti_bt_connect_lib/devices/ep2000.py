@@ -14,6 +14,7 @@ from ..fields import (
     SelectField,
     BoolField,
     WriteableUIntField,
+    ProbeUIntField,
 )
 
 
@@ -155,6 +156,16 @@ class EP2000(BaseDeviceV2):
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
                 UIntField(FieldName.TOTAL_NODE_COUNT, 21001),
+                # Raw probes for the battery pack temperature, which nothing
+                # on this device has exposed so far. Both addresses come from
+                # the BLUETTI app's register list via bluetti-registers#42:
+                # 6115 sits directly after pack SOH (6114) in the pack block
+                # read above, 6007 is in the pack main-info block (6000+).
+                # Reported unscaled so they can be compared with b_t_avg
+                # (51224) from a Modbus TCP read of the same unit. Read alone
+                # and dropped if the device refuses or ignores them.
+                ProbeUIntField(FieldName.RAW_REGISTER_6007, 6007),
+                ProbeUIntField(FieldName.RAW_REGISTER_6115, 6115),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),

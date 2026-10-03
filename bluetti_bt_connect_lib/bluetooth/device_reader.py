@@ -14,6 +14,13 @@ from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
 
+RESPONSE_TIMEOUT = 5
+"""Seconds to wait for the device to answer one request."""
+
+LATE_REPLY_GRACE = 1
+"""Seconds to wait after a probe register times out, so a reply that was
+merely slow lands now rather than inside the next request's response."""
+
 
 class DeviceReaderConfig:
     def __init__(
@@ -86,6 +93,11 @@ class DeviceReader:
         """Exception code from the most recent command, if the device refused
         it. Cleared at the start of every command."""
 
+        self.skipped_probe_registers: set[int] = set()
+        """Probe registers the device refused or ignored. Not asked for again
+        for the life of this reader, so an unserved address costs one failed
+        request rather than one per poll."""
+
     async def read(
         self, only_registers: List[ReadableRegisters] | None = None, raw: bool = False
     ) -> dict | None:
@@ -123,6 +135,14 @@ class DeviceReader:
                         for register in pack_registers:
                             parsed_data.update(
                                 await self._read_registers(register, raw, pack_num=pack)
+                            )
+
+                    # Probe registers last, so one that never answers has
+                    # nothing after it in this poll to disturb.
+                    if only_registers is None:
+                        for register in self.bluetti_device.get_optional_registers():
+                            parsed_data.update(
+                                await self._read_probe_register(register, raw)
                             )
 
             except TimeoutError:
@@ -365,6 +385,50 @@ class DeviceReader:
 
         return parsed_data
 
+    async def _read_probe_register(
+        self, register: ReadableRegisters, raw: bool
+    ) -> dict:
+        """Read one unconfirmed register without letting it fail the poll.
+
+        An ordinary register that times out aborts the whole poll, because a
+        missing reply usually means the link is gone. An unconfirmed address
+        is different: the device may simply not serve it, and may say so by
+        staying silent. Here a timeout or a refusal only drops this register,
+        and it is not asked for again. A real connection failure (BleakError)
+        still propagates as usual.
+        """
+
+        address = register.starting_address
+
+        if address in self.skipped_probe_registers:
+            return {}
+
+        try:
+            response = await self._async_send_command(register)
+        except (TimeoutError, asyncio.TimeoutError):
+            self.skipped_probe_registers.add(address)
+            self.logger.warning(
+                "Probe register %d did not answer - not reading it again "
+                "until the integration restarts",
+                address,
+            )
+            await asyncio.sleep(LATE_REPLY_GRACE)
+            return {}
+
+        if not response:
+            self.skipped_probe_registers.add(address)
+            self.logger.info(
+                "Probe register %d was refused by the device (code %s) - not "
+                "reading it again until the integration restarts",
+                address,
+                f"0x{self.last_exception_code:02x}"
+                if self.last_exception_code is not None
+                else "none",
+            )
+            return {}
+
+        return self._parse_registers(register, response, raw)
+
     def _parse_registers(
         self,
         register: ReadableRegisters,
@@ -403,7 +467,7 @@ class DeviceReader:
 
             self.logger.debug("Request sent (%s)", registers)
 
-            res = await asyncio.wait_for(self.notify_future, timeout=5)
+            res = await asyncio.wait_for(self.notify_future, timeout=RESPONSE_TIMEOUT)
 
             self.logger.debug("Got response")
 

@@ -55,9 +55,22 @@ class BluettiDevice:
 
         # Write-only fields (e.g. password/unlock fields) are never included
         # in regular polling - there's no need to continuously re-read them.
+        # Probe fields (unconfirmed addresses) are kept out of grouping too:
+        # each is read on its own so an unserved one can't fail its
+        # neighbours' read - see ProbeUIntField.
         self.polling_registers: List[ReadableRegisters] = self._group_registers(
-            [f for f in self.fields if not isinstance(f, WriteableStringField)]
+            [
+                f
+                for f in self.fields
+                if not isinstance(f, WriteableStringField)
+                and not getattr(f, "optional", False)
+            ]
         )
+        self.optional_registers: List[ReadableRegisters] = [
+            ReadableRegisters(f.address, f.size)
+            for f in self.fields
+            if getattr(f, "optional", False)
+        ]
         self.pack_polling_registers: List[ReadableRegisters] = []
 
         # Check if we even have battery pack fields defined
@@ -135,6 +148,10 @@ class BluettiDevice:
     def get_polling_registers(self) -> List[ReadableRegisters]:
         """Returns all registers required to poll device fields"""
         return self.polling_registers
+
+    def get_optional_registers(self) -> List[ReadableRegisters]:
+        """Returns the probe registers, each read on its own after the rest"""
+        return self.optional_registers
 
     def get_pack_polling_registers(self) -> List[ReadableRegisters]:
         """Returns all registers required to poll device battery pack fields"""

@@ -17,5 +17,6 @@ from .SwapStringField import *
 from .SwitchField import *
 from .ValueSwitchField import *
 from .UIntField import *
+from .ProbeUIntField import *
 from .WriteableUIntField import *
 from .VersionField import *

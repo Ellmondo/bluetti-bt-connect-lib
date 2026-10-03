@@ -130,3 +130,8 @@ class FieldName(Enum):
     BATTERY_STACK_COUNT = "battery_stack_count"
     TOTAL_NODE_COUNT = "total_node_count"
     ACTIVE_CELL_COUNT = "active_cell_count"
+
+    # Raw, unconfirmed registers read for investigation (ProbeUIntField).
+    # Named by address because what they hold is not yet known.
+    RAW_REGISTER_6007 = "raw_register_6007"
+    RAW_REGISTER_6115 = "raw_register_6115"
