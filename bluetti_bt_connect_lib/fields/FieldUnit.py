@@ -22,8 +22,6 @@ FIELD_UNIT: Dict[FieldName, str] = {
     FieldName.CONSUMPTION_POWER_ALL: "W",
     FieldName.PV_INPUT_POWER_ALL: "W",
     FieldName.GRID_POWER_ALL: "W",
-    FieldName.TOTAL_AC_CONSUMPTION: "kWh",
-    FieldName.TOTAL_GRID_FEED: "kWh",
     FieldName.MAX_GRID_EXPORT_POWER: "W",
     FieldName.MAX_GRID_EXPORT_CURRENT: "A",
     FieldName.MAX_GRID_IMPORT_POWER: "W",

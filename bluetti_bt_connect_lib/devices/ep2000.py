@@ -28,10 +28,12 @@ class EP2000(BaseDeviceV2):
                 SIntField(FieldName.CONSUMPTION_POWER_ALL, 142),
                 UIntField(FieldName.PV_INPUT_POWER_ALL, 144),
                 SIntField(FieldName.GRID_POWER_ALL, 146),
-                DecimalField(FieldName.TOTAL_AC_CONSUMPTION, 152, 1),
-                DecimalField(FieldName.TOTAL_GRID_FEED, 158, 1),
+                # Energy totals at 152 (AC consumption), 158 (grid feed-in)
+                # and 1202 (power generation) removed in 2.0.5: each read a
+                # flat 0 for over a week of normal running, through days of
+                # solar generation. Home Assistant's Integral helper on the
+                # power sensors gives working kWh totals instead.
                 SInt32Field(FieldName.TOTAL_PV_POWER, 1200),
-                SInt32Field(FieldName.POWER_GENERATION, 1202, 0.1),
                 UIntField(FieldName.PV_S1_POWER, 1212),
                 DecimalField(FieldName.PV_S1_VOLTAGE, 1213, 1),
                 DecimalField(FieldName.PV_S1_CURRENT, 1214, 1),

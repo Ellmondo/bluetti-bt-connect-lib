@@ -88,8 +88,6 @@ class FieldName(Enum):
     CONSUMPTION_POWER_ALL = "consumption_power_all"
     PV_INPUT_POWER_ALL = "pv_input_power_all"
     GRID_POWER_ALL = "grid_power_all"
-    TOTAL_AC_CONSUMPTION = "total_ac_consumption"
-    TOTAL_GRID_FEED = "total_grid_feed"
     PV_S2_CURRENT = "pv_s2_current"
     PV_S2_POWER = "pv_s2_power"
     PV_S2_VOLTAGE = "pv_s2_voltage"
