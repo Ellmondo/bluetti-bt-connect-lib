@@ -48,7 +48,7 @@ class BleakClientMock:
     """Mock a BLE Client."""
 
     def __init__(self, packs_max: int = 0):
-        self._bytemap: bytearray = bytearray(40000)
+        self._bytemap: bytearray = bytearray(0x20000)  # every 16-bit address
         self.packs: List[bytearray] = [bytearray() for _ in range(packs_max)]
 
     def add_r_int(self, register: int, value: int):

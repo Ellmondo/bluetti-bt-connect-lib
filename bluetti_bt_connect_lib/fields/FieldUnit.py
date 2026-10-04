@@ -30,6 +30,7 @@ FIELD_UNIT: Dict[FieldName, str] = {
     FieldName.PACK_VOLTAGE: "V",
     FieldName.PACK_BATTERY_SOC: "%",
     FieldName.PACK_SOH: "%",
+    FieldName.PACK_TEMPERATURE: "°F",
     FieldName.AC_P3_POWER: "W",
     FieldName.AC_P3_VOLTAGE: "V",
     FieldName.BATTERY_SOC: "%",

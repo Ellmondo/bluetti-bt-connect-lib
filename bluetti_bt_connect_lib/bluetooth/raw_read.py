@@ -45,6 +45,9 @@ class RawReadResult:
     detail: str | None = None
     """Human-readable reason for an ERROR outcome."""
 
+    slave: int = 1
+    """Slave address the read was sent to."""
+
     @property
     def ok(self) -> bool:
         return self.outcome is RawReadOutcome.OK
@@ -52,6 +55,7 @@ class RawReadResult:
     def as_dict(self) -> dict:
         """A plain dict, with each word also shown signed and in hex."""
         result: dict = {
+            "slave": self.slave,
             "address": self.address,
             "count": self.count,
             "outcome": self.outcome.value,

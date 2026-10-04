@@ -10,6 +10,7 @@ from ..base_devices import BluettiDevice
 from ..const import NOTIFY_UUID, WRITE_UUID
 from ..registers import ReadableRegisters, DeviceRegister, WriteableRegister
 from ..exceptions import ModbusError, ParseError
+from ..fields import Node, parse_node_list
 from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
@@ -17,6 +18,10 @@ from .raw_read import MAX_RAW_READ_COUNT, RawReadOutcome, RawReadResult
 
 RESPONSE_TIMEOUT = 5
 """Seconds to wait for the device to answer one request."""
+
+NODE_LIST_ADDRESS = 21002
+NODE_LIST_COUNT = 32
+"""Where the node list starts and how much of it read_nodes reads."""
 
 LATE_REPLY_GRACE = 1
 """Seconds to wait after a probe register times out, so a reply that was
@@ -386,7 +391,23 @@ class DeviceReader:
 
         return parsed_data
 
-    async def read_raw(self, address: int, count: int = 1) -> RawReadResult:
+    async def read_nodes(self) -> List[Node] | None:
+        """The devices in the system, from the battery's own node list.
+
+        Reads 32 registers at 21002 (four 8-word entries). Returns None if
+        the list could not be read.
+        """
+        result = await self.read_raw(NODE_LIST_ADDRESS, NODE_LIST_COUNT)
+
+        if not result.ok:
+            return None
+
+        data = b"".join(word.to_bytes(2, "big") for word in result.words)
+        return parse_node_list(data)
+
+    async def read_raw(
+        self, address: int, count: int = 1, slave: int = 1
+    ) -> RawReadResult:
         """Read a block of registers once and return the raw words.
 
         For exploring addresses the device definition does not cover. It is
@@ -405,31 +426,33 @@ class DeviceReader:
         if not 0 <= address or address + count > 0x10000:
             raise ValueError(f"address range {address}+{count} is outside 0-65535")
 
-        register = ReadableRegisters(address, count)
+        if not 0 <= slave <= 247:
+            raise ValueError(f"slave must be 0-247, got {slave}")
+
+        register = ReadableRegisters(address, count, slave)
+
+        def result(outcome, **kwargs):
+            return RawReadResult(address, count, outcome, slave=slave, **kwargs)
 
         async with self.polling_lock:
             try:
                 if not await self._open():
-                    return RawReadResult(address, count, RawReadOutcome.NOT_CONNECTED)
+                    return result(RawReadOutcome.NOT_CONNECTED)
 
                 try:
                     response = await self._async_send_command(register)
                 except (TimeoutError, asyncio.TimeoutError):
                     await asyncio.sleep(LATE_REPLY_GRACE)
-                    return RawReadResult(address, count, RawReadOutcome.NO_REPLY)
+                    return result(RawReadOutcome.NO_REPLY)
 
                 if not response:
                     if self.last_exception_code is not None:
-                        return RawReadResult(
-                            address,
-                            count,
+                        return result(
                             RawReadOutcome.REFUSED,
                             exception_code=self.last_exception_code,
                         )
 
-                    return RawReadResult(
-                        address,
-                        count,
+                    return result(
                         RawReadOutcome.ERROR,
                         detail="corrupted or unreadable reply",
                     )
@@ -440,13 +463,13 @@ class DeviceReader:
                     for i in range(0, len(body) - 1, 2)
                 ]
 
-                self.logger.info("Raw read %d+%d: %s", address, count, words)
-
-                return RawReadResult(address, count, RawReadOutcome.OK, words=words)
-            except BleakError as err:
-                return RawReadResult(
-                    address, count, RawReadOutcome.ERROR, detail=f"Bluetooth error: {err}"
+                self.logger.info(
+                    "Raw read %d+%d at slave %d: %s", address, count, slave, words
                 )
+
+                return result(RawReadOutcome.OK, words=words)
+            except BleakError as err:
+                return result(RawReadOutcome.ERROR, detail=f"Bluetooth error: {err}")
             finally:
                 await self._close()
 

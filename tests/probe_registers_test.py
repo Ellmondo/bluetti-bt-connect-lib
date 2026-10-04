@@ -47,8 +47,8 @@ def _device():
         fields=[
             UIntField(FieldName.PACK_VOLTAGE, 6111),
             UIntField(FieldName.PACK_SOH, 6114),
-            ProbeUIntField(FieldName.RAW_REGISTER_6115, 6115),
-            ProbeUIntField(FieldName.RAW_REGISTER_6007, 6007),
+            ProbeUIntField(FieldName.PACK_TEMPERATURE, 6115),
+            ProbeUIntField(FieldName.TIME_REMAINING, 6007),
         ],
         max_register_gap=8,
     )
@@ -95,8 +95,8 @@ class TestProbeRegisters(unittest.IsolatedAsyncioTestCase):
         data = await self._reader(mock).read()
 
         self.assertEqual(mock.requests, [(6111, 4), (6007, 1), (6115, 1)])
-        self.assertEqual(data[FieldName.RAW_REGISTER_6115.value], 59)
-        self.assertEqual(data[FieldName.RAW_REGISTER_6007.value], 99)
+        self.assertEqual(data[FieldName.PACK_TEMPERATURE.value], 59)
+        self.assertEqual(data[FieldName.TIME_REMAINING.value], 99)
         self.assertEqual(data[FieldName.PACK_SOH.value], 97)
 
     async def test_refused_probe_is_dropped_and_not_asked_again(self):
@@ -104,8 +104,8 @@ class TestProbeRegisters(unittest.IsolatedAsyncioTestCase):
         reader = self._reader(mock)
 
         data = await reader.read()
-        self.assertNotIn(FieldName.RAW_REGISTER_6007.value, data)
-        self.assertEqual(data[FieldName.RAW_REGISTER_6115.value], 59)
+        self.assertNotIn(FieldName.TIME_REMAINING.value, data)
+        self.assertEqual(data[FieldName.PACK_TEMPERATURE.value], 59)
         self.assertEqual(data[FieldName.PACK_VOLTAGE.value], 7546)
 
         mock.requests.clear()
@@ -119,7 +119,7 @@ class TestProbeRegisters(unittest.IsolatedAsyncioTestCase):
         data = await reader.read()
         self.assertIsNotNone(data)
         self.assertEqual(data[FieldName.PACK_SOH.value], 97)
-        self.assertEqual(data[FieldName.RAW_REGISTER_6115.value], 59)
+        self.assertEqual(data[FieldName.PACK_TEMPERATURE.value], 59)
 
         mock.requests.clear()
         data = await reader.read()
@@ -132,19 +132,15 @@ class TestProbeRegisters(unittest.IsolatedAsyncioTestCase):
         mock = self._mock(silent=[6111])
         self.assertIsNone(await self._reader(mock).read())
 
-    def test_ep2000_probes(self):
+    def test_ep2000_has_no_probes_left(self):
+        # 6115 was confirmed (pack temperature) and moved into the normal
+        # grouped pack read; 6007 duplicated it and was dropped.
         device = DEVICES["EP2000"]()
-        self.assertEqual(
-            [r.starting_address for r in device.get_optional_registers()],
-            [6007, 6115],
+        self.assertEqual(device.get_optional_registers(), [])
+        self.assertIn(
+            (6101, 15),
+            [(r.starting_address, r.quantity) for r in device.get_polling_registers()],
         )
-        polled = [
-            (r.starting_address, r.starting_address + r.quantity)
-            for r in device.get_polling_registers()
-        ]
-        for start, end in polled:
-            self.assertFalse(start <= 6115 < end, "6115 must not be grouped")
-            self.assertFalse(start <= 6007 < end, "6007 must not be grouped")
 
 
 if __name__ == "__main__":

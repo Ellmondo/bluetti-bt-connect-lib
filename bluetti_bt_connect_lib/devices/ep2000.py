@@ -14,7 +14,7 @@ from ..fields import (
     SelectField,
     BoolField,
     WriteableUIntField,
-    ProbeUIntField,
+    NodeCountField,
 )
 
 
@@ -155,17 +155,23 @@ class EP2000(BaseDeviceV2):
                 UIntField(FieldName.BATTERY_STACK_COUNT, 6154),
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
-                UIntField(FieldName.TOTAL_NODE_COUNT, 21001),
-                # Raw probes for the battery pack temperature, which nothing
-                # on this device has exposed so far. Both addresses come from
-                # the BLUETTI app's register list via bluetti-registers#42:
-                # 6115 sits directly after pack SOH (6114) in the pack block
-                # read above, 6007 is in the pack main-info block (6000+).
-                # Reported unscaled so they can be compared with b_t_avg
-                # (51224) from a Modbus TCP read of the same unit. Read alone
-                # and dropped if the device refuses or ignores them.
-                ProbeUIntField(FieldName.RAW_REGISTER_6007, 6007),
-                ProbeUIntField(FieldName.RAW_REGISTER_6115, 6115),
+                # Pack average temperature, in degrees Fahrenheit as the
+                # device sends it - Home Assistant converts it to the
+                # user's unit. Found in October 2026 (bluetti-registers#42):
+                # over an idle day the raw value tracked a nearby air
+                # sensor at ~1.7 per degree C and stayed a few degrees
+                # below it in shade, which fits F and not C + 40; it also
+                # matches a Modbus TCP read against a thermal camera on
+                # another EP2000, and BLUETTI's -40..160 range for it.
+                # 6007 in the pack main-info block reads the same value on
+                # a single-pack system and is not read. Signed, so it
+                # survives below 0 F.
+                SIntField(FieldName.PACK_TEMPERATURE, 6115),
+                # The node list at 21002: one 8-word entry per device
+                # (EBOX, inverter, packs), with slave address, serial and
+                # model code. 21001, read here before as a "total node
+                # count", is always 0 and was not a count at all.
+                NodeCountField(FieldName.CONNECTED_DEVICES, 21002, entries=4),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),

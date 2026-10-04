@@ -1,6 +1,6 @@
 """Bluetti BT Lib exports."""
 
-__version__ = "2.0.3"
+__version__ = "2.0.4"
 """Single source of truth for the package version.
 
 setup.py reads this when LIB_VERSION is not set, so an install straight from
@@ -23,5 +23,5 @@ from .bluetooth import (
     recognize_device,
 )
 from .enums import *
-from .fields import DeviceField, FieldName, FieldUnit, get_unit
+from .fields import DeviceField, FieldName, FieldUnit, Node, get_unit, parse_node_list
 from .utils.device_builder import build_device
