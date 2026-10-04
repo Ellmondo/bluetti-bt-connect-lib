@@ -13,6 +13,7 @@ from ..exceptions import ModbusError, ParseError
 from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
+from .raw_read import MAX_RAW_READ_COUNT, RawReadOutcome, RawReadResult
 
 RESPONSE_TIMEOUT = 5
 """Seconds to wait for the device to answer one request."""
@@ -384,6 +385,70 @@ class DeviceReader:
             )
 
         return parsed_data
+
+    async def read_raw(self, address: int, count: int = 1) -> RawReadResult:
+        """Read a block of registers once and return the raw words.
+
+        For exploring addresses the device definition does not cover. It is
+        strictly a read (Modbus function 3) at the read slave, never merged
+        with anything else, and it takes the same lock as polling and writes,
+        so it can never interleave with them.
+
+        A refusal or silence is reported in the result rather than raised:
+        exploring means asking for addresses the device may not serve, and
+        neither answer says anything is wrong with the link.
+        """
+
+        if not 1 <= count <= MAX_RAW_READ_COUNT:
+            raise ValueError(f"count must be 1-{MAX_RAW_READ_COUNT}, got {count}")
+
+        if not 0 <= address or address + count > 0x10000:
+            raise ValueError(f"address range {address}+{count} is outside 0-65535")
+
+        register = ReadableRegisters(address, count)
+
+        async with self.polling_lock:
+            try:
+                if not await self._open():
+                    return RawReadResult(address, count, RawReadOutcome.NOT_CONNECTED)
+
+                try:
+                    response = await self._async_send_command(register)
+                except (TimeoutError, asyncio.TimeoutError):
+                    await asyncio.sleep(LATE_REPLY_GRACE)
+                    return RawReadResult(address, count, RawReadOutcome.NO_REPLY)
+
+                if not response:
+                    if self.last_exception_code is not None:
+                        return RawReadResult(
+                            address,
+                            count,
+                            RawReadOutcome.REFUSED,
+                            exception_code=self.last_exception_code,
+                        )
+
+                    return RawReadResult(
+                        address,
+                        count,
+                        RawReadOutcome.ERROR,
+                        detail="corrupted or unreadable reply",
+                    )
+
+                body = register.parse_response(response)
+                words = [
+                    int.from_bytes(body[i : i + 2], "big")
+                    for i in range(0, len(body) - 1, 2)
+                ]
+
+                self.logger.info("Raw read %d+%d: %s", address, count, words)
+
+                return RawReadResult(address, count, RawReadOutcome.OK, words=words)
+            except BleakError as err:
+                return RawReadResult(
+                    address, count, RawReadOutcome.ERROR, detail=f"Bluetooth error: {err}"
+                )
+            finally:
+                await self._close()
 
     async def _read_probe_register(
         self, register: ReadableRegisters, raw: bool
