@@ -168,7 +168,13 @@ class EP2000(BaseDeviceV2):
                 DecimalField(FieldName.PACK_VOLTAGE, 6111, 1),
                 UIntField(FieldName.PACK_BATTERY_SOC, 6113, min=0, max=100),
                 UIntField(FieldName.PACK_SOH, 6114, min=0, max=100),
-                UIntField(FieldName.ACTIVE_CELL_COUNT, 6153),
+                # The pack's counts, low byte each, as BLUETTI's app reads
+                # them: 6152 cells, 6153 temperature sensors (NTCs), 6154
+                # battery modules (BMUs). Active cell count read 6153 until
+                # 2.0.8, so it showed the NTC count (112 instead of 224 on a
+                # seven-B700 HV800 stack).
+                UIntField(FieldName.ACTIVE_CELL_COUNT, 6152),
+                UIntField(FieldName.TEMPERATURE_SENSOR_COUNT, 6153),
                 UIntField(FieldName.BATTERY_STACK_COUNT, 6154),
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.

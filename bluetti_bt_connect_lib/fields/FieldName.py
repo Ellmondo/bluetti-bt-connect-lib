@@ -127,6 +127,7 @@ class FieldName(Enum):
     BMS_CONTROLLER_MODEL = "bms_controller_model"
     BATTERY_STACK_COUNT = "battery_stack_count"
     ACTIVE_CELL_COUNT = "active_cell_count"
+    TEMPERATURE_SENSOR_COUNT = "temperature_sensor_count"
 
     PACK_TEMPERATURE = "pack_temperature"
     HOME_LOAD_POWER = "home_load_power"
