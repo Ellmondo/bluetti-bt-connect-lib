@@ -12,6 +12,7 @@ from .SerialNumberField import *
 from .SIntField import *
 from .SInt32Field import *
 from .OffsetIntField import *
+from .StatusFields import *
 from .StringField import *
 from .WriteableStringField import *
 from .SwapStringField import *

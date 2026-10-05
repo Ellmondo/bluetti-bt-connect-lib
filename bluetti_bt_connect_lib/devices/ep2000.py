@@ -1,5 +1,5 @@
 from ..base_devices import BaseDeviceV2
-from ..enums import WorkingMode
+from ..enums import WorkingMode, EmsControlMode, InverterStatus, BatteryStatus
 from ..fields import (
     FieldName,
     UIntField,
@@ -16,6 +16,16 @@ from ..fields import (
     WriteableUIntField,
     NodeCountField,
     OffsetIntField,
+    MaskedEnumField,
+    BitMaskField,
+    LowByteOffsetField,
+    FirmwareVersionField,
+    U32VersionField,
+    ScheduleSlotField,
+    AlarmListField,
+    AlarmCountField,
+    AcPvSlotField,
+    AcPvTotalField,
 )
 
 
@@ -99,6 +109,10 @@ class EP2000(BaseDeviceV2):
                 # plain write reverts with 2241=8, persists with 2241=0.
                 # Turn this OFF to make manual settings stick.
                 ValueSwitchField(FieldName.EMS_CONTROL, 2241, on_value=8, off_value=0),
+                # The full EMS control mode behind that switch: 0/4 local, 8 AI,
+                # and 3/5/7 when the cloud (VPP, dynamic pricing) is in
+                # charge. Low nibble, as BLUETTI's app reads it.
+                MaskedEnumField(FieldName.EMS_CONTROL_MODE, 2241, EmsControlMode, 0x0F),
                 UIntField(FieldName.BATTERY_SOC_RANGE_START, 2022),
                 UIntField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders
@@ -182,6 +196,50 @@ class EP2000(BaseDeviceV2):
                 SInt32Field(FieldName.GRID_IMPORT_ENERGY, 156, 0.1, min=0).at_slave(0),
                 SInt32Field(FieldName.GRID_EXPORT_ENERGY, 158, 0.1, min=0).at_slave(0),
                 UIntField(FieldName.SELF_SUFFICIENCY, 164, max=100).at_slave(0),
+                # More of the EBOX's view (slave 0), decoded as BLUETTI's app
+                # does and checked on a real system (2026-10-05).
+                MaskedEnumField(FieldName.BATTERY_STATUS, 103, BatteryStatus, 0xFF).at_slave(0),
+                # Time to full and time to empty: the EBOX reports one value
+                # in both registers, the time left in the current direction.
+                UIntField(FieldName.TIME_REMAINING_MINUTES, 104).at_slave(0),
+                # 122 power type picks the code table; 126-129 warnings and
+                # 133-138 faults, one code per bit.
+                AlarmListField(FieldName.ACTIVE_ALARMS, 122).at_slave(0),
+                AlarmCountField(FieldName.ALARM_COUNT, 122).at_slave(0),
+                MaskedEnumField(FieldName.INVERTER_STATUS, 161, InverterStatus, 0xFF).at_slave(0),
+                # 174: IoT, BMS, other and meter error flags (bits 5, 6, 7, 10).
+                BitMaskField(FieldName.SYSTEM_ERROR, 174, 0x04E0).at_slave(0),
+                # AC-coupled PV phases (a metered inverter such as Enphase),
+                # listed by the EBOX as PV slots of type 101 after the two
+                # DC strings: slots 3-5 at 1226, 1234 and 1242. Each value
+                # is only reported for a slot of that type; 0 W without an
+                # AC PV meter.
+                AcPvTotalField(FieldName.AC_PV_POWER, 1226, slots=3).at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L1_POWER, 1226).at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L2_POWER, 1234).at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L3_POWER, 1242).at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L1_VOLTAGE, 1226, "voltage").at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L2_VOLTAGE, 1234, "voltage").at_slave(0),
+                AcPvSlotField(FieldName.AC_PV_L3_VOLTAGE, 1242, "voltage").at_slave(0),
+                # Time control (the schedule used by Custom mode): enable,
+                # then six slots of action / start / end. Read-only here.
+                BoolField(FieldName.TIME_CONTROL_ENABLED, 2029).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_1, 2030).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_2, 2033).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_3, 2036).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_4, 2039).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_5, 2042).at_slave(0),
+                ScheduleSlotField(FieldName.SCHEDULE_SLOT_6, 2045).at_slave(0),
+                # Battery limits from the BMS (EBOX battery totals block).
+                DecimalField(FieldName.MAX_CHARGE_CURRENT, 6011, 1).at_slave(0),
+                DecimalField(FieldName.MAX_DISCHARGE_CURRENT, 6012, 1).at_slave(0),
+                # EBOX: firmware, cloud (MQTT) connection, WiFi signal.
+                U32VersionField(FieldName.FIRMWARE_IOT, 11014).at_slave(0),
+                BitMaskField(FieldName.CLOUD_CONNECTED, 11018, 1 << 6).at_slave(0),
+                LowByteOffsetField(FieldName.WIFI_SIGNAL, 11026, -256).at_slave(0),
+                # Inverter firmware from its software list (slave 1).
+                FirmwareVersionField(FieldName.FIRMWARE_ARM, 1112, mcu_type=1),
+                FirmwareVersionField(FieldName.FIRMWARE_DSP, 1112, mcu_type=2),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),

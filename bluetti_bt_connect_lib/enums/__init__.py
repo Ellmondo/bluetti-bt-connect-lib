@@ -6,3 +6,4 @@ from .output_mode import *
 from .split_phase_mode import *
 from .ups_mode import *
 from .working_mode import *
+from .ebox_status import *

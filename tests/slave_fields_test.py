@@ -50,10 +50,16 @@ class TestGrouping(unittest.TestCase):
     def test_ep2000_reads_the_home_block_from_the_ebox(self):
         device = DEVICES["EP2000"]()
         groups = [(r.slave, r.starting_address, r.quantity) for r in device.get_polling_registers()]
-        self.assertIn((0, 142, 23), groups)
+        covered = set()
+        for slave, start, quantity in groups:
+            if slave == 0:
+                covered.update(range(start, start + quantity))
+        # Every home-block register the EBOX fields need is read from slave 0.
+        for register in (142, 143, 152, 153, 154, 155, 156, 157, 158, 159, 164):
+            self.assertIn(register, covered)
         # Slave 1 first, the EBOX block after it.
         self.assertEqual(groups[0][0], 1)
-        self.assertEqual(groups[-1], (0, 142, 23))
+        self.assertEqual(groups[-1][0], 0)
         # The inverter's own 142-146 read is unchanged.
         self.assertIn((1, 142, 5), groups)
 
@@ -109,7 +115,7 @@ class TestPollAcrossSlaves(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["self_sufficiency"], 64)
         self.assertEqual(data["consumption_power_all"], 0)
         self.assertEqual(data["pack_temperature"], 26)
-        self.assertIn((0, 142, 23), mock.requests)
+        self.assertTrue(any(slave == 0 for slave, _, _ in mock.requests))
 
     async def test_totals_past_16_bits_decode(self):
         # Grid import passes 6553.5 kWh (65535 raw) within weeks.
