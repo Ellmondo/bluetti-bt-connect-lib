@@ -67,7 +67,7 @@ class BluettiDevice:
             ]
         )
         self.optional_registers: List[ReadableRegisters] = [
-            ReadableRegisters(f.address, f.size)
+            ReadableRegisters(f.address, f.size, f.slave)
             for f in self.fields
             if getattr(f, "optional", False)
         ]
@@ -96,8 +96,23 @@ class BluettiDevice:
         if len(fields) == 0:
             return []
 
+        # Each slave is its own address space: group them separately, so a
+        # request never mixes fields that live on different devices. Slave 1
+        # (where nearly everything lives) is read first.
+        slaves = sorted({f.slave for f in fields}, key=lambda s: (s != 1, s))
+        if len(slaves) > 1:
+            return [
+                group
+                for slave in slaves
+                for group in self._group_registers(
+                    [f for f in fields if f.slave == slave]
+                )
+            ]
+
+        slave = slaves[0]
+
         singles = [
-            ReadableRegisters(f.address, f.size)
+            ReadableRegisters(f.address, f.size, slave)
             for f in sorted(fields, key=lambda f: f.address)
         ]
 
@@ -122,25 +137,25 @@ class BluettiDevice:
                 end = max(end, register_end)
                 continue
 
-            groups.append(self._build_group(start, end, members))
+            groups.append(self._build_group(start, end, members, slave))
             members = [register]
             start = register.starting_address
             end = register_end
 
-        groups.append(self._build_group(start, end, members))
+        groups.append(self._build_group(start, end, members, slave))
 
         return groups
 
     @staticmethod
     def _build_group(
-        start: int, end: int, members: List[ReadableRegisters]
+        start: int, end: int, members: List[ReadableRegisters], slave: int = 1
     ) -> ReadableRegisters:
         """Build one request covering `members`, or return it unchanged."""
 
         if len(members) == 1:
             return members[0]
 
-        group = ReadableRegisters(start, end - start)
+        group = ReadableRegisters(start, end - start, slave)
         group.members = members
 
         return group
@@ -178,9 +193,13 @@ class BluettiDevice:
         raise NotImplementedError
 
     def parse(
-        self, starting_address: int, data: bytes, pack_num: int | None = None
+        self,
+        starting_address: int,
+        data: bytes,
+        pack_num: int | None = None,
+        slave: int = 1,
     ) -> dict:
-        """Parse data"""
+        """Parse data read from `slave`, starting at `starting_address`."""
 
         # Offsets and size are counted in 2 byte chunks, so for the range we
         # need to divide the byte size by 2
@@ -196,7 +215,11 @@ class BluettiDevice:
         # Filter out fields not in range
         r = range(starting_address, starting_address + data_size)
         fields = [
-            f for f in candidates if f.address in r and f.address + f.size - 1 in r
+            f
+            for f in candidates
+            if f.slave == slave
+            and f.address in r
+            and f.address + f.size - 1 in r
         ]
 
         # Parse fields

@@ -531,10 +531,12 @@ class DeviceReader:
         self.logger.debug("Raw data: %s", body)
 
         if raw:
+            if register.slave != 1:
+                return {(register.slave, register.starting_address): body}
             return {register.starting_address: body}
 
         parsed = self.bluetti_device.parse(
-            register.starting_address, body, pack_num=pack_num
+            register.starting_address, body, pack_num=pack_num, slave=register.slave
         )
 
         self.logger.debug("Parsed data: %s", parsed)

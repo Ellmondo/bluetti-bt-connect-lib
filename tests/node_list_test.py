@@ -51,10 +51,12 @@ class TestEp2000Fields(unittest.TestCase):
     def setUp(self):
         self.device = DEVICES["EP2000"]()
 
-    def test_pack_temperature_is_fahrenheit_and_signed(self):
-        self.assertEqual(get_unit(FieldName.PACK_TEMPERATURE), "°F")
-        self.assertEqual(self.device.parse(6115, struct.pack("!H", 71)), {"pack_temperature": 71})
-        self.assertEqual(self.device.parse(6115, struct.pack("!h", -4)), {"pack_temperature": -4})
+    def test_pack_temperature_is_celsius_minus_40(self):
+        # BLUETTI's app decodes 6115 as raw - 40 degrees C.
+        self.assertEqual(get_unit(FieldName.PACK_TEMPERATURE), "°C")
+        self.assertEqual(self.device.parse(6115, struct.pack("!H", 66)), {"pack_temperature": 26})
+        self.assertEqual(self.device.parse(6115, struct.pack("!H", 30)), {"pack_temperature": -10})
+        self.assertEqual(self.device.parse(6115, struct.pack("!H", 0)), {"pack_temperature": -40})
 
     def test_pack_temperature_rides_in_the_pack_group(self):
         groups = [(r.starting_address, r.quantity) for r in self.device.get_polling_registers()]

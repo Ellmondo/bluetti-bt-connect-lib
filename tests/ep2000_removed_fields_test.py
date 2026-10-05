@@ -10,9 +10,10 @@ class TestEP2000RemovedFields(unittest.TestCase):
     def setUp(self):
         self.device = DEVICES["EP2000"]()
 
-    def test_dead_registers_are_not_read_as_fields(self):
-        # 152, 158 and 1202 read a flat 0 for over a week of normal running.
-        addresses = {f.address for f in self.device.fields}
+    def test_dead_registers_are_not_read_from_the_inverter(self):
+        # 152, 158 and 1202 read a flat 0 for over a week at slave 1. 152 and
+        # 158 are live at slave 0 (the EBOX) and are read from there now.
+        addresses = {f.address for f in self.device.fields if f.slave == 1}
         for address in (152, 158, 1202):
             self.assertNotIn(address, addresses)
 

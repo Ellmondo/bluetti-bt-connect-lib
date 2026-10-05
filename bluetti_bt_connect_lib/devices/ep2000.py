@@ -15,6 +15,7 @@ from ..fields import (
     BoolField,
     WriteableUIntField,
     NodeCountField,
+    OffsetIntField,
 )
 
 
@@ -157,23 +158,30 @@ class EP2000(BaseDeviceV2):
                 UIntField(FieldName.BATTERY_STACK_COUNT, 6154),
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
-                # Pack average temperature, in degrees Fahrenheit as the
-                # device sends it - Home Assistant converts it to the
-                # user's unit. Found in October 2026 (bluetti-registers#42):
-                # over an idle day the raw value tracked a nearby air
-                # sensor at ~1.7 per degree C and stayed a few degrees
-                # below it in shade, which fits F and not C + 40; it also
-                # matches a Modbus TCP read against a thermal camera on
-                # another EP2000, and BLUETTI's -40..160 range for it.
-                # 6007 in the pack main-info block reads the same value on
-                # a single-pack system and is not read. Signed, so it
-                # survives below 0 F.
-                SIntField(FieldName.PACK_TEMPERATURE, 6115),
+                # Pack average temperature: the register holds degrees C
+                # plus 40, and BLUETTI's own app decodes it as raw - 40
+                # (ProtocolParserV2.parsePackItemInfo, the same for 6007,
+                # the cell NTCs and the inverter's temperatures). 2.0.4
+                # read it as degrees F from a fit against air temperature;
+                # the vendor decoding replaces that.
+                OffsetIntField(FieldName.PACK_TEMPERATURE, 6115, offset=-40),
                 # The node list at 21002: one 8-word entry per device
                 # (EBOX, inverter, packs), with slave address, serial and
                 # model code. 21001, read here before as a "total node
                 # count", is always 0 and was not a count at all.
                 NodeCountField(FieldName.CONNECTED_DEVICES, 21002, entries=4),
+                # The home data block as the EBOX (slave 0) serves it. The
+                # inverter (slave 1) leaves most of this block at 0; the
+                # EBOX aggregates inverter, battery and meters and fills it
+                # in. Layout from BLUETTI's app (parseHomeData): 32-bit
+                # values, low word first, energies in 0.1 kWh. Checked
+                # against the app's lifetime statistics on a real system.
+                SInt32Field(FieldName.HOME_LOAD_POWER, 142).at_slave(0),
+                SInt32Field(FieldName.HOME_CONSUMPTION_ENERGY, 152, 0.1, min=0).at_slave(0),
+                SInt32Field(FieldName.SOLAR_ENERGY, 154, 0.1, min=0).at_slave(0),
+                SInt32Field(FieldName.GRID_IMPORT_ENERGY, 156, 0.1, min=0).at_slave(0),
+                SInt32Field(FieldName.GRID_EXPORT_ENERGY, 158, 0.1, min=0).at_slave(0),
+                UIntField(FieldName.SELF_SUFFICIENCY, 164, max=100).at_slave(0),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),

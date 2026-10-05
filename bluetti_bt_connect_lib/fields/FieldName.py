@@ -129,4 +129,10 @@ class FieldName(Enum):
     ACTIVE_CELL_COUNT = "active_cell_count"
 
     PACK_TEMPERATURE = "pack_temperature"
+    HOME_LOAD_POWER = "home_load_power"
+    SELF_SUFFICIENCY = "self_sufficiency"
+    HOME_CONSUMPTION_ENERGY = "home_consumption_energy"
+    SOLAR_ENERGY = "solar_energy"
+    GRID_IMPORT_ENERGY = "grid_import_energy"
+    GRID_EXPORT_ENERGY = "grid_export_energy"
     CONNECTED_DEVICES = "connected_devices"

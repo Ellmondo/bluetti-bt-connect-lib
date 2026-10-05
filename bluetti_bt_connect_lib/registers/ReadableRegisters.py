@@ -11,6 +11,7 @@ class ReadableRegisters(DeviceRegister):
         )
         self.starting_address = starting_address
         self.quantity = quantity
+        self.slave = slave
 
         self.members: List["ReadableRegisters"] = []
         """The individual per-field reads this request was merged from.
@@ -31,4 +32,9 @@ class ReadableRegisters(DeviceRegister):
         return bytes(response[3:-2])
 
     def __repr__(self):
+        if self.slave != 1:
+            return (
+                f"ReadableRegisters(starting_address={self.starting_address}, "
+                f"quantity={self.quantity}, slave={self.slave})"
+            )
         return f"ReadableRegisters(starting_address={self.starting_address}, quantity={self.quantity})"
