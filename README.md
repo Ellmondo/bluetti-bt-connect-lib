@@ -48,7 +48,7 @@ screen).
   diagnostics below will show you exactly what the device is doing.
 
 Full technical detail - the investigation and the register-level evidence - is in
-the v2.0 release notes (`RELEASE_NOTES_2.0.0.md`).
+the [2.0.0 section of the changelog](https://github.com/Ellmondo/bluetti-bt-connect-lib/blob/main/CHANGELOG.md#200-2026-09-21).
 
 ## Projects using this library
 
