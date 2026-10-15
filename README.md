@@ -32,6 +32,10 @@ screen).
 - **Grid export power/current, grid import power/current, working mode, AC
   output, charge-from-grid and grid-export enables all write and persist** over
   local BLE. Give a write a few seconds to settle before trusting the read-back.
+- **Battery SOC limits** (`soc_range_start` 2022, `soc_range_end` 2023) are
+  writable from 2.0.9, 5-100% in 1% steps, written to slave 0 like BLUETTI's
+  app does. iOS only offers 10% steps; Android and the battery take any whole
+  percent.
 - A new **AI Control Mode** switch exposes register 2241. When Bluetti's AI/EMS
   is on it actively manages the system and will override your manual settings
   (the old "accept-then-revert" you would then see). Leave it **off** for manual

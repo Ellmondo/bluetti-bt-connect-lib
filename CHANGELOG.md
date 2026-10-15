@@ -2,6 +2,33 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.9 (2026-10-15)
+
+### EP2000: battery SOC limits are writable
+
+`soc_range_start` (discharge floor, register 2022) and `soc_range_end`
+(charge ceiling, 2023) were read-only sensors. They are now writable numbers,
+5-100% in 1% steps.
+
+- Writes go to the EBOX (slave 0) as a single register, the way BLUETTI's app
+  writes them. Reads are unchanged.
+- The range is the app's own slider range. BLUETTI's iOS app moves in 10%
+  steps; its Android app rounds to the nearest whole percent, and units
+  reading values such as 87% show the battery keeps them.
+- Every reading from 0 to 100 is still reported, so a value set outside the
+  write range by another tool shows up instead of disappearing.
+- New `SocLimitField` and `check_soc_limits(low, high)`. The check keeps the
+  high limit at least 5% above the low one (`SOC_LIMIT_MIN_GAP`).
+- Other models (EP600, EP500, AC300, ...) keep their read-only SOC sensors.
+
+### Writes are range-checked before they are sent
+
+`DeviceReader.write()` now refuses a number outside a writable field's range
+and returns `FAILED` with detail `value out of range`, without touching the
+device. Before, only Home Assistant's slider bounds stood in the way; a
+service call or script could pass any value. This covers the grid import and
+export limits too.
+
 ## 2.0.8 (2026-10-05)
 
 ### Fixed: EP2000 active cell count

@@ -14,6 +14,7 @@ from ..fields import (
     SelectField,
     BoolField,
     WriteableUIntField,
+    SocLimitField,
     NodeCountField,
     OffsetIntField,
     MaskedEnumField,
@@ -113,8 +114,13 @@ class EP2000(BaseDeviceV2):
                 # and 3/5/7 when the cloud (VPP, dynamic pricing) is in
                 # charge. Low nibble, as BLUETTI's app reads it.
                 MaskedEnumField(FieldName.EMS_CONTROL_MODE, 2241, EmsControlMode, 0x0F),
-                UIntField(FieldName.BATTERY_SOC_RANGE_START, 2022),
-                UIntField(FieldName.BATTERY_SOC_RANGE_END, 2023),
+                # Battery SOC limits: discharge floor (2022) and charge
+                # ceiling (2023), in percent. BLUETTI's app writes them to
+                # the EBOX (slave 0, via write_slave_addr) as single
+                # registers, in 1% steps on Android. Writes are limited to
+                # 5-100%, the app's own slider range.
+                SocLimitField(FieldName.BATTERY_SOC_RANGE_START, 2022),
+                SocLimitField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders
                 # remain writable, but see the README before relying on
                 # any of them - the grid-limit fields in particular were

@@ -22,4 +22,5 @@ from .UIntField import *
 from .ProbeUIntField import *
 from .NodeListField import *
 from .WriteableUIntField import *
+from .SocLimitField import *
 from .VersionField import *

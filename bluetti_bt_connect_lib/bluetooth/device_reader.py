@@ -10,7 +10,7 @@ from ..base_devices import BluettiDevice
 from ..const import NOTIFY_UUID, WRITE_UUID
 from ..registers import ReadableRegisters, DeviceRegister, WriteableRegister
 from ..exceptions import ModbusError, ParseError
-from ..fields import Node, parse_node_list
+from ..fields import Node, WriteableUIntField, parse_node_list
 from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
@@ -187,6 +187,25 @@ class DeviceReader:
             self.logger.error("Field not supported: %s", field)
             return WriteResult(
                 WriteOutcome.FAILED, field, value, detail="field not supported"
+            )
+
+        writeable = [
+            f
+            for f in self.bluetti_device.fields
+            if f.name == field and f.is_writeable()
+        ]
+
+        if (
+            writeable
+            and isinstance(writeable[0], WriteableUIntField)
+            and not writeable[0].allowed_write_type(value)
+        ):
+            # Never send a number the field does not allow. Home Assistant
+            # bounds its sliders too, but a service call or script can
+            # still pass anything.
+            self.logger.error("Value out of range for %s: %s", field, value)
+            return WriteResult(
+                WriteOutcome.FAILED, field, value, detail="value out of range"
             )
 
         command = self.bluetti_device.build_write_command(field, value)
