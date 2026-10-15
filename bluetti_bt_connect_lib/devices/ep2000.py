@@ -117,8 +117,8 @@ class EP2000(BaseDeviceV2):
                 # Battery SOC limits: discharge floor (2022) and charge
                 # ceiling (2023), in percent. BLUETTI's app writes them to
                 # the EBOX (slave 0, via write_slave_addr) as single
-                # registers, in 1% steps on Android. Writes are limited to
-                # 5-100%, the app's own slider range.
+                # registers, in 1% steps. Writes are limited to 5-100%, the
+                # app's own slider range.
                 SocLimitField(FieldName.BATTERY_SOC_RANGE_START, 2022),
                 SocLimitField(FieldName.BATTERY_SOC_RANGE_END, 2023),
                 # CAUTION: the following two switches and four sliders

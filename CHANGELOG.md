@@ -12,9 +12,8 @@ Newest first. Each section is also published as the GitHub release for that vers
 
 - Writes go to the EBOX (slave 0) as a single register, the way BLUETTI's app
   writes them. Reads are unchanged.
-- The range is the app's own slider range. BLUETTI's iOS app moves in 10%
-  steps; its Android app rounds to the nearest whole percent, and units
-  reading values such as 87% show the battery keeps them.
+- The range and step match BLUETTI's app, which sets both limits to any
+  whole percent from 5 to 100.
 - Every reading from 0 to 100 is still reported, so a value set outside the
   write range by another tool shows up instead of disappearing.
 - New `SocLimitField` and `check_soc_limits(low, high)`. The check keeps the
