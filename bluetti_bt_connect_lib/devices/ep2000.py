@@ -1,5 +1,13 @@
+from decimal import Decimal
+
 from ..base_devices import BaseDeviceV2
-from ..enums import WorkingMode, EmsControlMode, InverterStatus, BatteryStatus
+from ..enums import (
+    WorkingMode,
+    EmsControlMode,
+    InverterStatus,
+    BatteryStatus,
+    BatteryMaintenanceStatus,
+)
 from ..fields import (
     FieldName,
     UIntField,
@@ -27,6 +35,9 @@ from ..fields import (
     AlarmCountField,
     AcPvSlotField,
     AcPvTotalField,
+    MaintenanceProgressField,
+    MaintenanceStopReasonField,
+    CellVoltageSpreadField,
 )
 
 
@@ -174,6 +185,13 @@ class EP2000(BaseDeviceV2):
                 DecimalField(FieldName.PACK_VOLTAGE, 6111, 1),
                 UIntField(FieldName.PACK_BATTERY_SOC, 6113, min=0, max=100),
                 UIntField(FieldName.PACK_SOH, 6114, min=0, max=100),
+                # Lowest and highest cell voltage in the pack, mV, and the
+                # spread between them (how far out of balance the cells
+                # are). Served by the inverter next to the pack voltage;
+                # read on a real HV800 as 3224 / 3232 mV (2026-10-25).
+                DecimalField(FieldName.CELL_VOLTAGE_MIN, 6116, 3, min=Decimal("0.001")),
+                DecimalField(FieldName.CELL_VOLTAGE_MAX, 6117, 3, min=Decimal("0.001")),
+                CellVoltageSpreadField(FieldName.CELL_VOLTAGE_SPREAD, 6116),
                 # The pack's counts, low byte each, as BLUETTI's app reads
                 # them: 6152 cells, 6153 temperature sensors (NTCs), 6154
                 # battery modules (BMUs). Active cell count read 6153 until
@@ -211,6 +229,16 @@ class EP2000(BaseDeviceV2):
                 # More of the EBOX's view (slave 0), decoded as BLUETTI's app
                 # does and checked on a real system (2026-10-05).
                 MaskedEnumField(FieldName.BATTERY_STATUS, 103, BatteryStatus, 0xFF).at_slave(0),
+                # Battery maintenance (full discharge then full charge), as
+                # BLUETTI's app reads it from register 106: status in bits
+                # 0-3, progress in bits 4-7 (x10 %), stop reason in bits
+                # 8-11. Read-only; read as 0x0022 (in progress, 20%) on a
+                # real run (2026-10-25).
+                MaskedEnumField(
+                    FieldName.BATTERY_MAINTENANCE_STATUS, 106, BatteryMaintenanceStatus, 0x000F
+                ).at_slave(0),
+                MaintenanceProgressField(FieldName.BATTERY_MAINTENANCE_PROGRESS, 106).at_slave(0),
+                MaintenanceStopReasonField(FieldName.BATTERY_MAINTENANCE_STOP_REASON, 106).at_slave(0),
                 # Time to full and time to empty: the EBOX reports one value
                 # in both registers, the time left in the current direction.
                 UIntField(FieldName.TIME_REMAINING_MINUTES, 104).at_slave(0),

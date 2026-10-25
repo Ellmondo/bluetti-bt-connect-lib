@@ -138,7 +138,7 @@ class TestProbeRegisters(unittest.IsolatedAsyncioTestCase):
         device = DEVICES["EP2000"]()
         self.assertEqual(device.get_optional_registers(), [])
         self.assertIn(
-            (6101, 15),
+            (6101, 17),
             [(r.starting_address, r.quantity) for r in device.get_polling_registers()],
         )
 

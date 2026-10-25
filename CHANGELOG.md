@@ -2,6 +2,39 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.10 (2026-10-25)
+
+### EP2000: battery maintenance status
+
+BLUETTI's battery maintenance (a full discharge then a full charge, which the
+app suggests every 3-6 months to rebalance the cells) reports its state in home
+register 106 at the EBOX (slave 0). Three new read-only fields decode it the
+way BLUETTI's app does:
+
+| field | bits | values |
+|---|---|---|
+| `battery_maintenance_status` | 0-3 | `BatteryMaintenanceStatus`: NOT_NEEDED, DUE, IN_PROGRESS, FINISHED, STOPPED, DUE_CONDITIONS_NOT_MET |
+| `battery_maintenance_progress` | 4-7 | percent, in 10% steps |
+| `battery_maintenance_stop_reason` | 8-11 | `BatteryMaintenanceStopReason`: NONE, GRID_OFFLINE, TEMPERATURE_HIGH, TEMPERATURE_LOW, PACK_COUNT_ABNORMAL, CHARGE_FAILED, DISCHARGE_FAILED, NOT_TRIGGERED |
+
+Checked on a real run: 106 read 0x0022, in progress at 20%. Starting or
+stopping maintenance is not included.
+
+### EP2000: lowest, highest and spread of cell voltages
+
+| field | register | notes |
+|---|---|---|
+| `cell_voltage_min` | 6116 | V, from mV |
+| `cell_voltage_max` | 6117 | V, from mV |
+| `cell_voltage_spread` | 6116-6117 | highest minus lowest, mV: how far out of balance the cells are |
+
+Read from the inverter (slave 1), next to the pack voltage: 3.224 V / 3.232 V,
+an 8 mV spread, on a seven-B700 HV800. A reading of 0 means no cells reported
+and is dropped.
+
+All five values ride in reads that were already made, so a poll sends no extra
+requests. `MaskedEnumField` gained an optional `shift`.
+
 ## 2.0.9 (2026-10-15)
 
 ### EP2000: battery SOC limits are writable

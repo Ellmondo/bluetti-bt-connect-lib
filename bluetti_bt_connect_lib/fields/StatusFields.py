@@ -11,6 +11,7 @@ from typing import List, Type, TypeVar
 
 from . import BoolField, DeviceField, FieldName
 from .alarm_codes import TABLE_B, TABLE_E
+from ..enums.ebox_status import BatteryMaintenanceStopReason
 
 E = TypeVar("E", bound=Enum)
 
@@ -26,13 +27,21 @@ def _signed(word: int) -> int:
 class MaskedEnumField(DeviceField):
     """An enum held in part of a register, e.g. its low byte or low nibble."""
 
-    def __init__(self, name: FieldName, address: int, e: Type[E], mask: int = 0xFFFF):
+    def __init__(
+        self,
+        name: FieldName,
+        address: int,
+        e: Type[E],
+        mask: int = 0xFFFF,
+        shift: int = 0,
+    ):
         super().__init__(name, address, 1)
         self.e = e
         self.mask = mask
+        self.shift = shift
 
     def parse(self, data: bytes) -> E | None:
-        val = struct.unpack("!H", data)[0] & self.mask
+        val = (struct.unpack("!H", data)[0] & self.mask) >> self.shift
         if val not in [m.value for m in self.e]:
             return None
         return self.e(val)
@@ -222,3 +231,51 @@ class U32VersionField(DeviceField):
         if version == 0:
             return None
         return f"{version // 100}.{version % 100:02d}"
+
+
+class MaintenanceProgressField(DeviceField):
+    """Battery maintenance progress in percent: register bits 4-7, x10.
+
+    BLUETTI's app multiplies the nibble by 10 for its progress bar, so the
+    value moves in 10% steps. Anything above 100 is not a real reading.
+    """
+
+    def __init__(self, name: FieldName, address: int):
+        super().__init__(name, address, 1)
+
+    def parse(self, data: bytes) -> int | None:
+        progress = ((struct.unpack("!H", data)[0] >> 4) & 0x0F) * 10
+        return progress if progress <= 100 else None
+
+
+class MaintenanceStopReasonField(DeviceField):
+    """Why a battery maintenance run stopped: register bits 8-11.
+
+    7-15 all mean "conditions not triggered" in BLUETTI's app and are
+    reported as BatteryMaintenanceStopReason.NOT_TRIGGERED.
+    """
+
+    def __init__(self, name: FieldName, address: int):
+        super().__init__(name, address, 1)
+
+    def parse(self, data: bytes) -> BatteryMaintenanceStopReason:
+        reason = (struct.unpack("!H", data)[0] >> 8) & 0x0F
+        return BatteryMaintenanceStopReason(min(reason, 7))
+
+
+class CellVoltageSpreadField(DeviceField):
+    """Highest minus lowest cell voltage, in mV.
+
+    Reads two registers: the lowest cell voltage then the highest, both in
+    mV. The spread is how far the cells are out of balance; a full charge
+    lets the BMS bring it down. None while the pack reports no cells.
+    """
+
+    def __init__(self, name: FieldName, address: int):
+        super().__init__(name, address, 2)
+
+    def parse(self, data: bytes) -> int | None:
+        low, high = _words(data)
+        if low == 0 or high < low:
+            return None
+        return high - low

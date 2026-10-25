@@ -60,7 +60,7 @@ class TestEp2000Fields(unittest.TestCase):
 
     def test_pack_temperature_rides_in_the_pack_group(self):
         groups = [(r.starting_address, r.quantity) for r in self.device.get_polling_registers()]
-        self.assertIn((6101, 15), groups)
+        self.assertIn((6101, 17), groups)
 
     def test_connected_devices_replaces_the_bogus_node_count(self):
         names = [f.name for f in self.device.fields]

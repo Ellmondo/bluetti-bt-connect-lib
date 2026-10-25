@@ -46,3 +46,39 @@ class BatteryStatus(Enum):
     IDLE = 0
     CHARGING = 1
     DISCHARGING = 2
+
+
+@unique
+class BatteryMaintenanceStatus(Enum):
+    """Home data register 106, bits 0-3 (EBOX, slave 0).
+
+    BLUETTI's battery maintenance ("pack aging"): a full discharge followed
+    by a full charge, which the app suggests every 3-6 months to rebalance
+    the cells. Values as the app shows them.
+    """
+
+    NOT_NEEDED = 0
+    DUE = 1
+    IN_PROGRESS = 2
+    FINISHED = 3
+    STOPPED = 4
+    DUE_CONDITIONS_NOT_MET = 5
+
+
+@unique
+class BatteryMaintenanceStopReason(Enum):
+    """Home data register 106, bits 8-11: why a maintenance run stopped.
+
+    1-6 are the app's reasons. The app treats 7-15 alike ("maintenance
+    conditions not triggered, no maintenance needed"); they are all reported
+    as NOT_TRIGGERED.
+    """
+
+    NONE = 0
+    GRID_OFFLINE = 1
+    TEMPERATURE_HIGH = 2
+    TEMPERATURE_LOW = 3
+    PACK_COUNT_ABNORMAL = 4
+    CHARGE_FAILED = 5
+    DISCHARGE_FAILED = 6
+    NOT_TRIGGERED = 7
