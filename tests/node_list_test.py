@@ -69,7 +69,8 @@ class TestEp2000Fields(unittest.TestCase):
         self.assertEqual(
             self.device.parse(21002, _bytes(REAL_NODE_WORDS)), {"connected_devices": 3}
         )
-        groups = [(r.starting_address, r.quantity) for r in self.device.get_polling_registers()]
+        # The node list barely changes: it is read on the slow schedule.
+        groups = [(r.starting_address, r.quantity) for r in self.device.get_slow_polling_registers()]
         self.assertIn((21002, 32), groups)
 
 

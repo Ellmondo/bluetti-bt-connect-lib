@@ -17,7 +17,8 @@ class TestPackCounts(unittest.TestCase):
 
     def test_counts_are_read_in_one_request(self):
         device = DEVICES["EP2000"]()
-        groups = [(r.slave, r.starting_address, r.quantity) for r in device.get_polling_registers()]
+        # Counts only change if the battery hardware does: slow schedule.
+        groups = [(r.slave, r.starting_address, r.quantity) for r in device.get_slow_polling_registers()]
         self.assertIn((1, 6152, 3), groups)
 
 

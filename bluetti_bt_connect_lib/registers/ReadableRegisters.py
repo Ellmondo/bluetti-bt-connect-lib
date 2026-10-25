@@ -22,6 +22,11 @@ class ReadableRegisters(DeviceRegister):
         combined range.
         """
 
+        self.fallback: List["ReadableRegisters"] = []
+        """Smaller requests to use if the device refuses this one: the
+        members regrouped with the conservative default gap and size. Empty
+        means fall back to the members one by one."""
+
     def response_size(self):
         # 3 byte header
         # each returned field is actually 2 bytes (16-bit word)

@@ -60,8 +60,8 @@ class TestGrouping(unittest.TestCase):
         # Slave 1 first, the EBOX block after it.
         self.assertEqual(groups[0][0], 1)
         self.assertEqual(groups[-1][0], 0)
-        # The inverter's own 142-146 read is unchanged.
-        self.assertIn((1, 142, 5), groups)
+        # The inverter's own 142-146 is still read, from slave 1.
+        self.assertTrue(any(s == 1 and a <= 142 and 146 < a + q for s, a, q in groups))
 
     def test_parse_only_matches_fields_of_the_answering_slave(self):
         device = DEVICES["EP2000"]()

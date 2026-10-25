@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import struct
+import time
 import async_timeout
 from typing import Any, Callable, Iterable, List, cast
 from bleak import BleakClient, BleakScanner
@@ -46,6 +47,7 @@ class DeviceReaderConfig:
         timeout: int = 60,
         use_encryption: bool = False,
         keep_alive_seconds: float = 0,
+        slow_poll_seconds: float = 600,
     ):
         self.timeout = timeout
         self.use_encryption = use_encryption
@@ -60,6 +62,10 @@ class DeviceReaderConfig:
         than the polling interval keeps the link up between polls, removing
         connection setup from every cycle. Negative holds it indefinitely.
         """
+
+        self.slow_poll_seconds = slow_poll_seconds
+        """How often fields marked slow_poll() are read again. Their last
+        values are reported on every poll in between."""
 
 
 
@@ -111,6 +117,17 @@ class DeviceReader:
         """Exception code from the most recent command, if the device refused
         it. Cleared at the start of every command."""
 
+        self.rejected_groups: set[tuple[int, int, int]] = set()
+        """Merged reads the device refused with a Modbus exception, as
+        (slave, start, quantity). Their fields are read one request each
+        from then on, so a range that spans an unserved address costs one
+        refused request for the life of this reader rather than one per poll.
+        CRC errors and timeouts are not counted - they are not the device
+        saying no."""
+
+        self._slow_values: dict = {}
+        self._last_slow_read: float | None = None
+
         self.skipped_probe_registers: set[int] = set()
         """Probe registers the device refused or ignored. Not asked for again
         for the life of this reader, so an unserved address costs one failed
@@ -139,6 +156,12 @@ class DeviceReader:
 
                     for register in registers:
                         parsed_data.update(await self._read_registers(register, raw))
+
+                    if only_registers is None:
+                        await self._read_slow_registers(raw)
+                        # Last known values of the slow fields, under the
+                        # values read this poll.
+                        parsed_data = {**self._slow_values, **parsed_data}
 
                     for pack in range(1, self.bluetti_device.max_packs + 1):
                         # Selecting a pack is a write - it returns no register
@@ -442,6 +465,11 @@ class DeviceReader:
         costs its own field rather than every field grouped with it.
         """
 
+        key = (register.slave, register.starting_address, register.quantity)
+
+        if len(register.members) > 1 and key in self.rejected_groups:
+            return await self._read_members(register, raw, pack_num)
+
         response = await self._async_send_command(register)
 
         if response:
@@ -451,23 +479,66 @@ class DeviceReader:
         if len(register.members) <= 1:
             return {}
 
-        self.logger.debug(
-            "Grouped read %s was rejected - falling back to %d individual reads",
-            register,
-            len(register.members),
-        )
+        if self.last_exception_code is not None:
+            self.rejected_groups.add(key)
+            self.logger.info(
+                "Grouped read %s refused (exception 0x%02x) - reading its %d "
+                "fields separately from now on",
+                register,
+                self.last_exception_code,
+                len(register.members),
+            )
+        else:
+            self.logger.debug(
+                "Grouped read %s failed - falling back to %d individual reads",
+                register,
+                len(register.members),
+            )
+
+        return await self._read_members(register, raw, pack_num)
+
+    async def _read_slow_registers(self, raw: bool) -> None:
+        """Read the slow-poll fields when they are due, keeping the values."""
+
+        registers = self.bluetti_device.get_slow_polling_registers()
+
+        if not registers:
+            return
+
+        now = time.monotonic()
+
+        if (
+            self._last_slow_read is not None
+            and now - self._last_slow_read < self.config.slow_poll_seconds
+        ):
+            return
+
+        values: dict = {}
+
+        for register in registers:
+            values.update(await self._read_registers(register, raw))
+
+        # Keep earlier values for anything that did not answer this time. If
+        # nothing answered, try again on the next poll rather than waiting.
+        self._slow_values.update(values)
+
+        if values:
+            self._last_slow_read = now
+
+    async def _read_members(
+        self, register: ReadableRegisters, raw: bool, pack_num: int | None
+    ) -> dict:
+        """Read a refused merged request in smaller pieces.
+
+        Uses its conservative fallback groups when it has them (each of which
+        can itself be refused and split further), otherwise its fields one
+        at a time.
+        """
 
         parsed_data: dict = {}
 
-        for member in register.members:
-            member_response = await self._async_send_command(member)
-
-            if not member_response:
-                continue
-
-            parsed_data.update(
-                self._parse_registers(member, member_response, raw, pack_num)
-            )
+        for part in register.fallback or register.members:
+            parsed_data.update(await self._read_registers(part, raw, pack_num))
 
         return parsed_data
 

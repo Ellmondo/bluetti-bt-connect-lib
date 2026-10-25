@@ -2,6 +2,32 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.12 (2026-10-26)
+
+### EP2000: faster polls
+
+A poll now takes 13 requests instead of 28, so each update over Bluetooth
+finishes in roughly half the time.
+
+- **Wider merged reads.** The EP2000 merges fields up to 32 registers apart
+  into reads of up to 100 registers (`max_register_gap=32`,
+  `max_register_quantity=100`). Every merged range sits inside blocks read
+  successfully on a real EP2000 + EBOX. Other models keep the default
+  grouping (8 / 32).
+- **Slow-poll tier.** Values that rarely change are read on the first poll and
+  then every 10 minutes: inverter and IoT firmware, WiFi name, connected
+  devices, cell / sensor / module counts and the grid voltage and frequency
+  limits. Their last values are reported on every poll in between, so nothing
+  goes unavailable. New `DeviceField.slow_poll()`,
+  `BluettiDevice.get_slow_polling_registers()` and
+  `DeviceReaderConfig(slow_poll_seconds=600)`.
+- **Refused ranges are remembered.** If the device refuses a merged read with
+  a Modbus exception, it is read in the default-size pieces instead
+  (`ReadableRegisters.fallback`), and that choice is kept for the life of the
+  reader (`DeviceReader.rejected_groups`), so a bad range costs one refused
+  request, not one per poll. CRC errors and timeouts do not count as a
+  refusal. An INFO log line names any range that gets split.
+
 ## 2.0.11 (2026-10-26)
 
 ### EP2000: write the time-control schedule

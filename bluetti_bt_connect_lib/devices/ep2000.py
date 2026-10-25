@@ -174,11 +174,11 @@ class EP2000(BaseDeviceV2):
                 # Bluetti app exactly). This was a redundant, non-working
                 # duplicate.
                 BoolField(FieldName.CTRL_GENERATOR, 2246),
-                DecimalField(FieldName.GRID_VOLT_MIN_VAL, 2435, 1),
-                DecimalField(FieldName.GRID_VOLT_MAX_VAL, 2436, 1),
-                DecimalField(FieldName.GRID_FREQ_MIN_VALUE, 2437, 2),
-                DecimalField(FieldName.GRID_FREQ_MAX_VALUE, 2438, 2),
-                SwapStringField(FieldName.WIFI_NAME, 12002, 16),
+                DecimalField(FieldName.GRID_VOLT_MIN_VAL, 2435, 1).slow_poll(),
+                DecimalField(FieldName.GRID_VOLT_MAX_VAL, 2436, 1).slow_poll(),
+                DecimalField(FieldName.GRID_FREQ_MIN_VALUE, 2437, 2).slow_poll(),
+                DecimalField(FieldName.GRID_FREQ_MAX_VALUE, 2438, 2).slow_poll(),
+                SwapStringField(FieldName.WIFI_NAME, 12002, 16).slow_poll(),
                 # Read directly here rather than via the pack_fields/
                 # max_packs mechanism below, which is dormant (max_packs=0)
                 # and untested for multi-pack selection.
@@ -205,9 +205,9 @@ class EP2000(BaseDeviceV2):
                 # battery modules (BMUs). Active cell count read 6153 until
                 # 2.0.8, so it showed the NTC count (112 instead of 224 on a
                 # seven-B700 HV800 stack).
-                UIntField(FieldName.ACTIVE_CELL_COUNT, 6152),
-                UIntField(FieldName.TEMPERATURE_SENSOR_COUNT, 6153),
-                UIntField(FieldName.BATTERY_STACK_COUNT, 6154),
+                UIntField(FieldName.ACTIVE_CELL_COUNT, 6152).slow_poll(),
+                UIntField(FieldName.TEMPERATURE_SENSOR_COUNT, 6153).slow_poll(),
+                UIntField(FieldName.BATTERY_STACK_COUNT, 6154).slow_poll(),
                 # Exploratory, unverified: "Total Node Count", documented
                 # alongside a separate write-only discovery-trigger register.
                 # Pack average temperature: the register holds degrees C
@@ -221,7 +221,7 @@ class EP2000(BaseDeviceV2):
                 # (EBOX, inverter, packs), with slave address, serial and
                 # model code. 21001, read here before as a "total node
                 # count", is always 0 and was not a count at all.
-                NodeCountField(FieldName.CONNECTED_DEVICES, 21002, entries=4),
+                NodeCountField(FieldName.CONNECTED_DEVICES, 21002, entries=4).slow_poll(),
                 # The home data block as the EBOX (slave 0) serves it. The
                 # inverter (slave 1) leaves most of this block at 0; the
                 # EBOX aggregates inverter, battery and meters and fills it
@@ -285,12 +285,12 @@ class EP2000(BaseDeviceV2):
                 DecimalField(FieldName.MAX_CHARGE_CURRENT, 6011, 1).at_slave(0),
                 DecimalField(FieldName.MAX_DISCHARGE_CURRENT, 6012, 1).at_slave(0),
                 # EBOX: firmware, cloud (MQTT) connection, WiFi signal.
-                U32VersionField(FieldName.FIRMWARE_IOT, 11014).at_slave(0),
+                U32VersionField(FieldName.FIRMWARE_IOT, 11014).at_slave(0).slow_poll(),
                 BitMaskField(FieldName.CLOUD_CONNECTED, 11018, 1 << 6).at_slave(0),
                 LowByteOffsetField(FieldName.WIFI_SIGNAL, 11026, -256).at_slave(0),
                 # Inverter firmware from its software list (slave 1).
-                FirmwareVersionField(FieldName.FIRMWARE_ARM, 1112, mcu_type=1),
-                FirmwareVersionField(FieldName.FIRMWARE_DSP, 1112, mcu_type=2),
+                FirmwareVersionField(FieldName.FIRMWARE_ARM, 1112, mcu_type=1).slow_poll(),
+                FirmwareVersionField(FieldName.FIRMWARE_DSP, 1112, mcu_type=2).slow_poll(),
             ],
             [
                 SwapStringField(FieldName.PACK_TYPE, 6101, 6),
@@ -306,4 +306,11 @@ class EP2000(BaseDeviceV2):
             # echoed by the inverter and then overwritten by the slave-0
             # setpoint within a few seconds (confirmed on hardware).
             write_slave_addr=0,
+            # Wider merged reads: about 18 requests a poll instead of 28,
+            # plus the slow-poll fields every 10 minutes. Every range here
+            # sits inside blocks read successfully on a real unit; if one is
+            # ever refused the reader splits it back to the default grouping
+            # and remembers that (DeviceReader.rejected_groups).
+            max_register_gap=32,
+            max_register_quantity=100,
         )

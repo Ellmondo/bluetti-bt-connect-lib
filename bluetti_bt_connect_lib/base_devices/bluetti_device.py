@@ -58,14 +58,20 @@ class BluettiDevice:
         # Probe fields (unconfirmed addresses) are kept out of grouping too:
         # each is read on its own so an unserved one can't fail its
         # neighbours' read - see ProbeUIntField.
+        polled = [
+            f
+            for f in self.fields
+            if not isinstance(f, WriteableStringField)
+            and not getattr(f, "optional", False)
+        ]
         self.polling_registers: List[ReadableRegisters] = self._group_registers(
-            [
-                f
-                for f in self.fields
-                if not isinstance(f, WriteableStringField)
-                and not getattr(f, "optional", False)
-            ]
+            [f for f in polled if not f.slow]
         )
+        self.slow_polling_registers: List[ReadableRegisters] = self._group_registers(
+            [f for f in polled if f.slow]
+        )
+        """Fields marked slow_poll(): read on the first poll, then every few
+        minutes (see DeviceReader)."""
         self.optional_registers: List[ReadableRegisters] = [
             ReadableRegisters(f.address, f.size, f.slave)
             for f in self.fields
@@ -119,6 +125,36 @@ class BluettiDevice:
         if self.max_register_gap is None:
             return singles
 
+        groups = self._merge(
+            singles, self.max_register_gap, self.max_register_quantity, slave
+        )
+
+        # A device that merges more widely than the defaults gets a
+        # conservative split ready for any wide read the device refuses.
+        for group in groups:
+            if len(group.members) <= 1:
+                continue
+            fallback = self._merge(
+                group.members,
+                DEFAULT_MAX_REGISTER_GAP,
+                DEFAULT_MAX_REGISTER_QUANTITY,
+                slave,
+            )
+            if len(fallback) > 1:
+                group.fallback = fallback
+
+        return groups
+
+    @classmethod
+    def _merge(
+        cls,
+        singles: List[ReadableRegisters],
+        max_gap: int,
+        max_quantity: int,
+        slave: int,
+    ) -> List[ReadableRegisters]:
+        """Merge sorted single-field reads that sit within `max_gap`."""
+
         groups: List[ReadableRegisters] = []
         members = [singles[0]]
         start = singles[0].starting_address
@@ -130,19 +166,19 @@ class BluettiDevice:
             # Fields can overlap (two fields reading the same words), in
             # which case the gap is negative and the merge is free.
             gap = register.starting_address - end
-            quantity = register_end - start
+            quantity = max(end, register_end) - start
 
-            if gap <= self.max_register_gap and quantity <= self.max_register_quantity:
+            if gap <= max_gap and quantity <= max_quantity:
                 members.append(register)
                 end = max(end, register_end)
                 continue
 
-            groups.append(self._build_group(start, end, members, slave))
+            groups.append(cls._build_group(start, end, members, slave))
             members = [register]
             start = register.starting_address
             end = register_end
 
-        groups.append(self._build_group(start, end, members, slave))
+        groups.append(cls._build_group(start, end, members, slave))
 
         return groups
 
@@ -161,8 +197,12 @@ class BluettiDevice:
         return group
 
     def get_polling_registers(self) -> List[ReadableRegisters]:
-        """Returns all registers required to poll device fields"""
+        """Registers read on every poll."""
         return self.polling_registers
+
+    def get_slow_polling_registers(self) -> List[ReadableRegisters]:
+        """Registers read on the first poll and then every few minutes."""
+        return self.slow_polling_registers
 
     def get_optional_registers(self) -> List[ReadableRegisters]:
         """Returns the probe registers, each read on its own after the rest"""

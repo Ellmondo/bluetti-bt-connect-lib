@@ -88,7 +88,7 @@ class TestEP2000Poll(unittest.IsolatedAsyncioTestCase):
         groups = [(r.slave, r.starting_address, r.quantity) for r in device.get_polling_registers()]
         # Both fit in reads that were already made.
         self.assertIn((1, 6101, 17), groups)
-        self.assertIn((0, 103, 4), groups)
+        self.assertTrue(any(s == 0 and a <= 106 < a + q for s, a, q in groups))
 
         mock = TwoSlaveMock()
         mock.set(1, 6116, _w(3224, 3232))
