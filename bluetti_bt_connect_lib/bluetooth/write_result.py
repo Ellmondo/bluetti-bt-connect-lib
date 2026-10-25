@@ -85,6 +85,9 @@ class WriteResult:
                 f"0x{self.exception_code:02x} ({self.exception_meaning})"
             )
 
+        if self.outcome is WriteOutcome.MISMATCHED and self.detail:
+            return f"{self.field}: echo did not match - {self.detail}"
+
         if self.outcome is WriteOutcome.MISMATCHED:
             return (
                 f"{self.field}: echo did not match - wrote {self.requested}, "

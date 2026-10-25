@@ -131,6 +131,8 @@ class FieldName(Enum):
     CELL_VOLTAGE_MIN = "cell_voltage_min"
     CELL_VOLTAGE_MAX = "cell_voltage_max"
     CELL_VOLTAGE_SPREAD = "cell_voltage_spread"
+    BATTERY_CURRENT = "battery_current"
+    BATTERY_POWER_BMS = "battery_power_bms"
 
     PACK_TEMPERATURE = "pack_temperature"
     HOME_LOAD_POWER = "home_load_power"

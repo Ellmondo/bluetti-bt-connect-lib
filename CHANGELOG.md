@@ -2,6 +2,47 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.11 (2026-10-26)
+
+### EP2000: write the time-control schedule
+
+New `DeviceReader.write_schedule(periods)` replaces the whole charge/discharge
+schedule in one write, the way BLUETTI's app does it: registers 2030-2047 as a
+single function-16 request to the EBOX (slave 0), periods earliest first,
+unused slots as off 00:00-00:00.
+
+- New module `bluetti_bt_connect_lib.schedule`: `SchedulePeriod(action,
+  start, end)`, `validate_schedule()`, `encode_schedule()`,
+  `decode_schedule()` and `ScheduleError`.
+- A schedule is refused before anything is sent if it has more than six
+  periods, a period set to off, a period that ends at or before its start
+  (periods stay within one day, as in the app), or overlapping periods.
+  Periods may touch.
+- The schedule only acts in the Custom working mode. The weekday mask (5000)
+  is not served on the EP2000, so it applies every day.
+- `time_control_enabled` (2029) is now a `SwitchField`, written to the EBOX.
+- Function-16 writes now check the echoed start address and quantity and
+  report `MISMATCHED` if they differ.
+
+### EP2000: battery current and power from the BMS
+
+| field | register | notes |
+|---|---|---|
+| `battery_current` | 6112 | A, signed, /10 (BLUETTI's scale) |
+| `battery_power_bms` | 6111-6112 | W, pack voltage x current |
+
+Positive while charging, negative while discharging. Checked against Home
+Assistant's own figures: -8.4 A x 732 V = -6.1 kW while the house drew
+6.0-6.2 kW from the battery, and +0.3 A (+220 W) with the battery holding in
+backup mode. Both come from the pack read already made.
+
+### Releases
+
+Pushing a `vX.Y.Z` tag now runs the whole release: tests, build, publish to
+PyPI, then a GitHub release whose notes are this file's section for that
+version. A tag without a matching section, or one that disagrees with
+`__version__`, fails before anything is published.
+
 ## 2.0.10 (2026-10-25)
 
 ### EP2000: battery maintenance status

@@ -279,3 +279,18 @@ class CellVoltageSpreadField(DeviceField):
         if low == 0 or high < low:
             return None
         return high - low
+
+
+class PackPowerField(DeviceField):
+    """Battery power from the BMS: pack voltage (/10 V) times current (/10 A).
+
+    Reads the voltage register and the signed current register after it.
+    Positive while charging, negative while discharging, in watts.
+    """
+
+    def __init__(self, name: FieldName, address: int):
+        super().__init__(name, address, 2)
+
+    def parse(self, data: bytes) -> int:
+        voltage, current = struct.unpack("!Hh", data)
+        return round(voltage / 10 * current / 10)

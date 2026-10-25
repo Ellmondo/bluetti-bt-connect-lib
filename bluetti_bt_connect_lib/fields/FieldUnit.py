@@ -31,6 +31,8 @@ FIELD_UNIT: Dict[FieldName, str] = {
     FieldName.CELL_VOLTAGE_MIN: "V",
     FieldName.CELL_VOLTAGE_MAX: "V",
     FieldName.CELL_VOLTAGE_SPREAD: "mV",
+    FieldName.BATTERY_CURRENT: "A",
+    FieldName.BATTERY_POWER_BMS: "W",
     FieldName.BATTERY_MAINTENANCE_PROGRESS: "%",
     FieldName.PACK_TEMPERATURE: "°C",
     FieldName.HOME_LOAD_POWER: "W",

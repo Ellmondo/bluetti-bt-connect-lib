@@ -6,10 +6,20 @@ name: Publish to PyPI
 # silently keeps running whatever it installed first. A pinned PyPI version
 # gives it something to compare against, and upgrades start working on their
 # own.
+#
+# Pushing a tag vX.Y.Z runs the whole release: tests, build, publish to PyPI,
+# then a GitHub release whose notes are the "## X.Y.Z" section of
+# CHANGELOG.md. The GitHub release is created last, so it only appears once
+# the package is on PyPI. (A release created by this workflow's token cannot
+# start another workflow, which is why publishing is triggered by the tag
+# rather than by the release.)
+#
+# workflow_dispatch re-publishes a version to PyPI by hand; it never creates
+# a GitHub release.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -66,7 +76,11 @@ jobs:
       - name: Resolve and verify version
         id: resolve
         run: |
-          REQUESTED="${{ github.event.release.tag_name || inputs.version }}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            REQUESTED="${{ github.ref_name }}"
+          else
+            REQUESTED="${{ inputs.version }}"
+          fi
           REQUESTED="${REQUESTED#v}"
           PACKAGED="$(python -c "import re, pathlib; print(re.search(r'^__version__\s*=\s*[\"\']([^\"\']+)', pathlib.Path('bluetti_bt_connect_lib/__init__.py').read_text(), re.M).group(1))")"
 
@@ -84,6 +98,35 @@ jobs:
           fi
 
           echo "version=$PACKAGED" >> "$GITHUB_OUTPUT"
+
+      # The release notes come from CHANGELOG.md. A version without its own
+      # section fails here, before anything is published.
+      - name: Extract release notes
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+          version = os.environ["VERSION"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(
+              rf"^## {re.escape(version)}(?:[ \t][^\n]*)?\n(.*?)(?=^## |\Z)",
+              text,
+              re.M | re.S,
+          )
+          if not match or not match.group(1).strip():
+              print(f"::error::CHANGELOG.md has no '## {version}' section")
+              sys.exit(1)
+          pathlib.Path("release_notes.md").write_text(
+              match.group(1).strip() + "\n", encoding="utf-8"
+          )
+          PY
+          cat release_notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release_notes.md
 
       - name: Build sdist and wheel
         env:
@@ -119,3 +162,29 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    name: GitHub release
+    needs: [build, publish]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" --notes-file release_notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" --notes-file release_notes.md --verify-tag
+          fi

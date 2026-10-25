@@ -38,6 +38,7 @@ from ..fields import (
     MaintenanceProgressField,
     MaintenanceStopReasonField,
     CellVoltageSpreadField,
+    PackPowerField,
 )
 
 
@@ -183,6 +184,13 @@ class EP2000(BaseDeviceV2):
                 # and untested for multi-pack selection.
                 SwapStringField(FieldName.BMS_CONTROLLER_MODEL, 6101, 6),
                 DecimalField(FieldName.PACK_VOLTAGE, 6111, 1),
+                # Pack current (signed, /10 A, BLUETTI's scale) and the
+                # power it gives with the pack voltage: positive charging,
+                # negative discharging. Checked on a real HV800 against Home
+                # Assistant's own figures: -8.4 A x 732 V = -6.1 kW while the
+                # house drew 6.0-6.2 kW from the battery (2026-10-25).
+                SIntField(FieldName.BATTERY_CURRENT, 6112, 0.1),
+                PackPowerField(FieldName.BATTERY_POWER_BMS, 6111),
                 UIntField(FieldName.PACK_BATTERY_SOC, 6113, min=0, max=100),
                 UIntField(FieldName.PACK_SOH, 6114, min=0, max=100),
                 # Lowest and highest cell voltage in the pack, mV, and the
@@ -263,7 +271,10 @@ class EP2000(BaseDeviceV2):
                 AcPvSlotField(FieldName.AC_PV_L3_VOLTAGE, 1242, "voltage").at_slave(0),
                 # Time control (the schedule used by Custom mode): enable,
                 # then six slots of action / start / end. Read-only here.
-                BoolField(FieldName.TIME_CONTROL_ENABLED, 2029).at_slave(0),
+                # Time control on/off. Writable from 2.0.11; the periods
+                # themselves are written as one block with
+                # DeviceReader.write_schedule() (see schedule.py).
+                SwitchField(FieldName.TIME_CONTROL_ENABLED, 2029).at_slave(0),
                 ScheduleSlotField(FieldName.SCHEDULE_SLOT_1, 2030).at_slave(0),
                 ScheduleSlotField(FieldName.SCHEDULE_SLOT_2, 2033).at_slave(0),
                 ScheduleSlotField(FieldName.SCHEDULE_SLOT_3, 2036).at_slave(0),

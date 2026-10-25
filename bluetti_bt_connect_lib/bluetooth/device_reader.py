@@ -1,16 +1,28 @@
 import asyncio
 import logging
+import struct
 import async_timeout
-from typing import Any, Callable, List, cast
+from typing import Any, Callable, Iterable, List, cast
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from ..base_devices import BluettiDevice
 from ..const import NOTIFY_UUID, WRITE_UUID
-from ..registers import ReadableRegisters, DeviceRegister, WriteableRegister
+from ..registers import (
+    ReadableRegisters,
+    DeviceRegister,
+    WriteableRegister,
+    WriteableRegisters,
+)
 from ..exceptions import ModbusError, ParseError
-from ..fields import Node, WriteableUIntField, parse_node_list
+from ..fields import FieldName, Node, WriteableUIntField, parse_node_list
+from ..schedule import (
+    SCHEDULE_ADDRESS,
+    ScheduleError,
+    SchedulePeriod,
+    encode_schedule,
+)
 from ..utils.privacy import mac_loggable
 from .device_connection import DeviceConnection
 from .write_result import WriteResult, WriteOutcome
@@ -216,6 +228,43 @@ class DeviceReader:
                 WriteOutcome.FAILED, field, value, detail="field is not writeable"
             )
 
+        return await self._send_write(field, value, command)
+
+    async def write_schedule(self, periods: Iterable[SchedulePeriod]) -> WriteResult:
+        """Replace the whole time-control schedule in one write.
+
+        The periods are validated (at most six, each within one day, no
+        overlaps) and written earliest first to 2030-2047 as a single
+        function-16 request at the device's write slave, the way BLUETTI's
+        app does it. Unused slots are written as off 00:00-00:00. Nothing is
+        sent if the schedule is not valid.
+        """
+        name = "schedule"
+        periods = list(periods)
+
+        if not any(
+            f.name == FieldName.SCHEDULE_SLOT_1.value for f in self.bluetti_device.fields
+        ):
+            return WriteResult(
+                WriteOutcome.FAILED, name, periods, detail="schedule not supported"
+            )
+
+        try:
+            words = encode_schedule(periods)
+        except ScheduleError as err:
+            self.logger.error("Schedule not written: %s", err)
+            return WriteResult(WriteOutcome.FAILED, name, periods, detail=str(err))
+
+        command = WriteableRegisters(
+            SCHEDULE_ADDRESS, words, self.bluetti_device.write_slave_addr
+        )
+        return await self._send_write(name, periods, command)
+
+    async def _send_write(
+        self, field: str, value: Any, command: DeviceRegister
+    ) -> WriteResult:
+        """Send one write on the shared connection and interpret the reply."""
+
         async with self.polling_lock:
             try:
                 async with async_timeout.timeout(self.config.timeout):
@@ -280,8 +329,20 @@ class DeviceReader:
             self.logger.warning("%s", result)
             return result
 
-        # Multi-register writes echo address and quantity rather than a value,
-        # so a well-formed response is the whole confirmation available.
+        # Multi-register writes echo the start address and quantity rather
+        # than the values; check both.
+        if isinstance(command, WriteableRegisters):
+            address, quantity = struct.unpack("!HH", command.parse_response(response))
+            if address != command.address or quantity != len(command.values):
+                result = WriteResult(
+                    WriteOutcome.MISMATCHED,
+                    field,
+                    value,
+                    detail=f"echoed address {address}, quantity {quantity}",
+                )
+                self.logger.warning("%s", result)
+                return result
+
         self.logger.debug("Multi-register write acknowledged: %s", field)
         return WriteResult(WriteOutcome.ACCEPTED, field, value)
 
