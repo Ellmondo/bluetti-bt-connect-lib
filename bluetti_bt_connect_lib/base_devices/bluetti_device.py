@@ -38,12 +38,21 @@ class BluettiDevice:
         max_register_gap: int | None = DEFAULT_MAX_REGISTER_GAP,
         max_register_quantity: int = DEFAULT_MAX_REGISTER_QUANTITY,
         write_slave_addr: int = 1,
+        max_register_block: int | None = None,
     ):
         self.fields = fields
         self.pack_fields = pack_fields
         self.max_packs = max_packs
         self.max_register_gap = max_register_gap
         self.max_register_quantity = max_register_quantity
+        self.max_register_block = max_register_block
+        """If set, a merged read never crosses a multiple of this address.
+
+        BLUETTI's V2 devices serve registers in blocks that start at
+        multiples of 100 (100, 1100, 1200, 1300, ...). A read running past
+        the end of a block is refused with exception 0x03, so merging across
+        a block start costs a refused request before the fallback kicks in.
+        """
         self.write_slave_addr = write_slave_addr
         """Modbus slave address to send WRITES to. Reads use slave 1, but on
         2nd-generation IoT devices the authoritative settings controller is
@@ -126,7 +135,11 @@ class BluettiDevice:
             return singles
 
         groups = self._merge(
-            singles, self.max_register_gap, self.max_register_quantity, slave
+            singles,
+            self.max_register_gap,
+            self.max_register_quantity,
+            slave,
+            self.max_register_block,
         )
 
         # A device that merges more widely than the defaults gets a
@@ -152,8 +165,12 @@ class BluettiDevice:
         max_gap: int,
         max_quantity: int,
         slave: int,
+        block: int | None = None,
     ) -> List[ReadableRegisters]:
-        """Merge sorted single-field reads that sit within `max_gap`."""
+        """Merge sorted single-field reads that sit within `max_gap`.
+
+        With `block`, a merged read never spans two blocks of that size.
+        """
 
         groups: List[ReadableRegisters] = []
         members = [singles[0]]
@@ -168,7 +185,11 @@ class BluettiDevice:
             gap = register.starting_address - end
             quantity = max(end, register_end) - start
 
-            if gap <= max_gap and quantity <= max_quantity:
+            same_block = block is None or (
+                start // block == (max(end, register_end) - 1) // block
+            )
+
+            if gap <= max_gap and quantity <= max_quantity and same_block:
                 members.append(register)
                 end = max(end, register_end)
                 continue

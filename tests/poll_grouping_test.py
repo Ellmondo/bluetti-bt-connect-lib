@@ -55,9 +55,32 @@ class TestGroups(unittest.TestCase):
         self.slow = _groups(self.device.get_slow_polling_registers())
 
     def test_request_counts(self):
-        # 28 requests a poll before 2.0.12.
-        self.assertEqual(len(self.fast), 13)
+        # 28 requests a poll before 2.0.12; 13 planned in 2.0.12, which became
+        # 15 on hardware when 1290-1327 was refused.
+        self.assertEqual(len(self.fast), 14)
         self.assertEqual(len(self.slow), 6)
+
+    def test_no_read_crosses_a_block_start(self):
+        # Read on a real unit: 1290-1327 refused with 0x03 (the 1200 block
+        # ends before 1300). 1290 and 1300+ are now separate reads.
+        for slave, start, quantity in self.fast + self.slow:
+            self.assertEqual(start // 100, (start + quantity - 1) // 100, (slave, start, quantity))
+        self.assertIn((1, 1290, 1), self.fast)
+        self.assertIn((1, 1300, 28), self.fast)
+
+    def test_block_limit_is_opt_in(self):
+        from bluetti_bt_connect_lib.base_devices import BluettiDevice
+        from bluetti_bt_connect_lib.fields import FieldName, UIntField
+
+        fields = [UIntField(FieldName.TOTAL_SELF_CONSUMPTION, 1290), UIntField(FieldName.GRID_FREQUENCY, 1300)]
+        plain = BluettiDevice(fields=fields, max_register_gap=32, max_register_quantity=100)
+        blocked = BluettiDevice(
+            fields=fields, max_register_gap=32, max_register_quantity=100, max_register_block=100
+        )
+        self.assertEqual(_groups(plain.get_polling_registers()), [(1, 1290, 11)])
+        self.assertEqual(
+            _groups(blocked.get_polling_registers()), [(1, 1290, 1), (1, 1300, 1)]
+        )
 
     def test_sizes_and_never_read_ranges(self):
         for slave, start, quantity in self.fast + self.slow:
@@ -105,7 +128,7 @@ class TestSlowPoll(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn((1, 6152, 3), first_requests)
         self.assertNotIn((1, 6152, 3), mock.requests)
-        self.assertEqual(len(mock.requests), 13)
+        self.assertEqual(len(mock.requests), 14)
         # The last values are still reported, so nothing goes unavailable.
         for data in (first, second):
             self.assertEqual(data["active_cell_count"], 224)
@@ -123,23 +146,23 @@ class TestSlowPoll(unittest.IsolatedAsyncioTestCase):
 
 class TestRefusedRange(unittest.IsolatedAsyncioTestCase):
     async def test_split_once_and_remembered(self):
-        # Pretend 1295 (between the 1290 and 1300 fields) is not served.
-        mock = RefusingMock(1, 1295)
-        mock.set(1, 1313, struct.pack("!H", 1234))
+        # Pretend 1505 (between the 1500 and 1510 fields) is not served.
+        mock = RefusingMock(1, 1505)
         r = reader(mock)
 
-        data = await r.read()
-        self.assertIn((1, 1290, 38), mock.requests)
-        self.assertIn((1, 1290, 1), mock.requests)
-        self.assertIn((1, 1300, 2), mock.requests)
-        self.assertIn((1, 1313, 15), mock.requests)
-        self.assertIn((1, 1290, 38), r.rejected_groups)
-        self.assertIn("total_self_consumption", data)
+        with self.assertLogs(r.logger, "INFO") as logs:
+            data = await r.read()
+        self.assertIn((1, 1500, 27), mock.requests)
+        self.assertIn((1, 1500, 1), mock.requests)
+        self.assertIn((1, 1510, 17), mock.requests)
+        self.assertIn((1, 1500, 27), r.rejected_groups)
+        self.assertTrue(any("as 2 smaller requests" in line for line in logs.output))
+        self.assertIn("ac_p1_power", data)
 
         mock.requests.clear()
         await r.read()
-        self.assertNotIn((1, 1290, 38), mock.requests)
-        self.assertIn((1, 1290, 1), mock.requests)
+        self.assertNotIn((1, 1500, 27), mock.requests)
+        self.assertIn((1, 1500, 1), mock.requests)
 
 
 if __name__ == "__main__":

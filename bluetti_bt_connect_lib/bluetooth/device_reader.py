@@ -482,11 +482,11 @@ class DeviceReader:
         if self.last_exception_code is not None:
             self.rejected_groups.add(key)
             self.logger.info(
-                "Grouped read %s refused (exception 0x%02x) - reading its %d "
-                "fields separately from now on",
+                "Grouped read %s refused (exception 0x%02x) - reading it as %d "
+                "smaller requests from now on",
                 register,
                 self.last_exception_code,
-                len(register.members),
+                len(register.fallback or register.members),
             )
         else:
             self.logger.debug(

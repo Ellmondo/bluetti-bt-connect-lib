@@ -2,6 +2,25 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.13 (2026-10-26)
+
+### EP2000: 14 requests a poll, no refused read at startup
+
+On a real EP2000 the 2.0.12 merged read of 1290-1327 was refused (Modbus
+exception 0x03: the 1200 block ends before 1300). The fallback handled it, but
+that left 15 requests a poll and one refused request every time the
+integration started.
+
+- New `BluettiDevice(max_register_block=...)`: a merged read never crosses a
+  multiple of this address. The EP2000 uses 100, matching how BLUETTI's
+  devices serve registers (blocks at 100, 1100, 1200, 1300, ...). Off by
+  default, so other models are unchanged.
+- On the EP2000 this only splits 1290 from 1300-1327: 14 requests a poll,
+  down from 28 before 2.0.12. Every other merged range was confirmed on
+  hardware.
+- The log line for a refused merged read now gives the number of requests it
+  is split into, rather than its field count.
+
 ## 2.0.12 (2026-10-26)
 
 ### EP2000: faster polls

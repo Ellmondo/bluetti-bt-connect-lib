@@ -306,11 +306,14 @@ class EP2000(BaseDeviceV2):
             # echoed by the inverter and then overwritten by the slave-0
             # setpoint within a few seconds (confirmed on hardware).
             write_slave_addr=0,
-            # Wider merged reads: about 18 requests a poll instead of 28,
-            # plus the slow-poll fields every 10 minutes. Every range here
-            # sits inside blocks read successfully on a real unit; if one is
-            # ever refused the reader splits it back to the default grouping
-            # and remembers that (DeviceReader.rejected_groups).
+            # Wider merged reads, never across a block start (multiples of
+            # 100): 14 requests a poll instead of 28, plus the slow-poll
+            # fields every 10 minutes. Every range was read successfully on
+            # a real unit (2026-10-25); 1290-1327 was refused with 0x03
+            # because the 1200 block ends before 1300, hence the block
+            # limit. If a range is ever refused the reader splits it back to
+            # the default grouping and remembers that.
             max_register_gap=32,
             max_register_quantity=100,
+            max_register_block=100,
         )
