@@ -53,7 +53,6 @@ setup(
     # original from 2004, which drops a top-level logging/ package into
     # site-packages. Neither belongs in a dependency list.
     install_requires=[
-        "async_timeout",
         "bleak",
         "bleak_retry_connector",
         "crcmod",

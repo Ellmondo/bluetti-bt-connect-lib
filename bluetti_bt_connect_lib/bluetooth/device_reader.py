@@ -2,7 +2,6 @@ import asyncio
 import logging
 import struct
 import time
-import async_timeout
 from typing import Any, Callable, Iterable, List, cast
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
@@ -150,7 +149,7 @@ class DeviceReader:
 
         async with self.polling_lock:
             try:
-                async with async_timeout.timeout(self.config.timeout):
+                async with asyncio.timeout(self.config.timeout):
                     if not await self._open():
                         return None
 
@@ -290,7 +289,7 @@ class DeviceReader:
 
         async with self.polling_lock:
             try:
-                async with async_timeout.timeout(self.config.timeout):
+                async with asyncio.timeout(self.config.timeout):
                     if not await self._open():
                         return WriteResult(
                             WriteOutcome.FAILED, field, value, detail="not connected"

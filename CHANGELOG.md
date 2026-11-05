@@ -2,6 +2,16 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.14 (2026-11-05)
+
+### One dependency fewer
+
+The library no longer needs the `async_timeout` package. Read and write
+timeouts use Python's built-in `asyncio.timeout` instead, which has done the
+same job since Python 3.11, the minimum this library supports. Behaviour is
+unchanged: a read that runs out of time still returns `None`, and a write
+still reports `NO_RESPONSE`. A new test covers both.
+
 ## 2.0.13 (2026-10-26)
 
 ### EP2000: 14 requests a poll, no refused read at startup

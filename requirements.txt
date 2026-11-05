@@ -3,7 +3,6 @@
 # asyncio and logging used to be listed here. Both are standard library - the
 # PyPI packages of those names are an empty placeholder and a Python 2 relic
 # respectively, and installing them achieves nothing.
-async_timeout
 bleak
 bleak_retry_connector
 crcmod

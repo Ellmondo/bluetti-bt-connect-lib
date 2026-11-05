@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from typing import Any
-import async_timeout
 from bleak import BleakClient
 from bleak.exc import BleakError
 
@@ -48,7 +47,7 @@ class DeviceWriter:
 
         async with self.polling_lock:
             try:
-                async with async_timeout.timeout(self.config.timeout):
+                async with asyncio.timeout(self.config.timeout):
                     if not self.client.is_connected:
                         self.logger.debug("Connecting to device")
                         await self.client.connect()
