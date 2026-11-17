@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 from bleak import BleakScanner
@@ -17,6 +19,7 @@ from ..utils.privacy import mac_loggable
 # scan this falls back to. The library stays free of any Home Assistant
 # import by taking it as a callable.
 DeviceProvider = Callable[[], Optional[BLEDevice]]
+
 
 
 class DeviceConnection:
@@ -55,6 +58,14 @@ class DeviceConnection:
         self._disconnect_callback: Callable[[], None] | None = None
         self._keep_alive_task: asyncio.Task | None = None
 
+        self._consecutive_failures = 0
+        self._closing = False
+
+        self._connect_count = 0
+        self._connected_since: datetime | None = None
+        self._connected_at = 0.0  # _monotonic(), for log messages
+        self._requests_served = 0
+
         self.logger = logging.getLogger(
             f"{__name__}.{mac_loggable(address).replace(':', '_')}"
         )
@@ -73,6 +84,43 @@ class DeviceConnection:
             self._client, "is_connected", False
         )
 
+    @property
+    def consecutive_failures(self) -> int:
+        """Failed connections since the last one that succeeded."""
+        return self._consecutive_failures
+
+    @property
+    def connect_count(self) -> int:
+        """Successful connections made by this object."""
+        return self._connect_count
+
+    @property
+    def connected_since(self) -> datetime | None:
+        """When the current link was established (UTC), or None if down."""
+        return self._connected_since if self.is_connected else None
+
+    @property
+    def requests_served(self) -> int:
+        """Requests sent on the current link, or the last one if it is down.
+
+        Reset when a new link is made. Logged when a link fails, so a fault
+        that sets in after a certain amount of traffic shows up in the log.
+        """
+        return self._requests_served
+
+    def record_request(self) -> None:
+        """Count one request sent on the current link."""
+        self._requests_served += 1
+
+    def describe(self) -> str:
+        """The current link's age and traffic, for log messages."""
+        if self._client is None:
+            return "not connected"
+        return (
+            f"connected {_format_duration(_monotonic() - self._connected_at)}, "
+            f"{self._requests_served} requests on this connection"
+        )
+
     def set_data_callback(self, callback: Callable[[bytes], None]) -> None:
         """Claim incoming notifications for the duration of one conversation."""
         self._data_callback = callback
@@ -87,29 +135,67 @@ class DeviceConnection:
     async def connect(self) -> bool:
         """Locate the device, connect, and subscribe to notifications."""
         self._cancel_keep_alive()
+        self._closing = False
+        client: BleakClientWithServiceCache | None = None
 
         try:
             device = await self._find_device()
 
             if device is None:
+                self._record_failure("device not found")
                 return False
 
-            self._client = await establish_connection(
+            client = await establish_connection(
                 BleakClientWithServiceCache,
                 device,
                 device.name or "Unknown Device",
                 max_attempts=self._max_attempts,
                 disconnected_callback=self._on_disconnected,
             )
+            self._client = client
 
-            await self._client.start_notify(NOTIFY_UUID, self._on_notification)
-            self.logger.debug("Connected, notifications subscribed")
+            try:
+                await client.start_notify(NOTIFY_UUID, self._on_notification)
+            except BleakError as err:
+                if "not found" in str(err).lower():
+                    # The services cached for this device do not include the
+                    # notify characteristic. Clear the cache so the next
+                    # attempt reads the services from the device afresh.
+                    self.logger.warning(
+                        "Notify characteristic missing, clearing cached services"
+                    )
+                    await _quietly(client.clear_cache())
+                raise
 
-            return True
-        except (BleakError, TimeoutError, asyncio.TimeoutError) as err:
-            self.logger.warning("Connection failed: %s", err)
+        except Exception as err:
             self._client = None
+            if client is not None:
+                # Connected but unusable: close the link properly rather than
+                # leaving it open with nothing holding a reference to it.
+                await _quietly(client.disconnect())
+            self._record_failure(str(err) or type(err).__name__)
             return False
+
+        self._consecutive_failures = 0
+        self._connect_count += 1
+        self._connected_since = datetime.now(timezone.utc)
+        self._connected_at = _monotonic()
+        self._requests_served = 0
+        self.logger.debug("Connected, notifications subscribed")
+
+        return True
+
+    def _record_failure(self, reason: str) -> None:
+        self._consecutive_failures += 1
+
+        if self._consecutive_failures > 1:
+            self.logger.warning(
+                "Connection failed (%d in a row): %s",
+                self._consecutive_failures,
+                reason,
+            )
+        else:
+            self.logger.warning("Connection failed: %s", reason)
 
     async def ensure_connected(self) -> bool:
         """Reuse the existing link, reconnecting only if it has dropped."""
@@ -125,18 +211,15 @@ class DeviceConnection:
     async def disconnect(self) -> None:
         """Close the link and drop all state."""
         self._cancel_keep_alive()
+        self._closing = True
 
-        if self._client is not None:
-            try:
-                await self._client.stop_notify(NOTIFY_UUID)
-            except Exception:
-                pass
-            try:
-                await self._client.disconnect()
-            except Exception:
-                pass
-
+        client = self._client
         self._client = None
+
+        if client is not None:
+            await _quietly(client.stop_notify(NOTIFY_UUID))
+            await _quietly(client.disconnect())
+
         self.logger.debug("Disconnected")
 
     def schedule_disconnect(self, after_seconds: float) -> None:
@@ -190,13 +273,22 @@ class DeviceConnection:
         )
 
         if device is None:
-            self.logger.error("Device not found")
+            self.logger.debug("Device not found")
 
         return device
 
-    def _on_disconnected(self, _client) -> None:
+    def _on_disconnected(self, client) -> None:
         """bleak calls this from its own task when the link drops."""
-        self.logger.debug("Device disconnected")
+        if client is not None and self._client is not None and client is not self._client:
+            # A late callback from a link that has already been replaced.
+            self.logger.debug("Earlier connection reported disconnected, ignoring")
+            return
+
+        if self._closing or self._client is None:
+            self.logger.debug("Device disconnected")
+        else:
+            self.logger.warning("Device dropped the connection (%s)", self.describe())
+
         self._client = None
 
         if self._disconnect_callback is not None:
@@ -208,3 +300,29 @@ class DeviceConnection:
             return
 
         self._data_callback(bytes(data))
+
+
+def _monotonic() -> float:
+    """time.monotonic, behind a name tests can replace without stopping the
+    event loop's own clock."""
+    return time.monotonic()
+
+
+def _format_duration(seconds: float) -> str:
+    """12s, 5m 03s, 26h 14m."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+async def _quietly(awaitable: Awaitable) -> None:
+    """Await something whose failure changes nothing for the caller."""
+    try:
+        await awaitable
+    except Exception:
+        pass

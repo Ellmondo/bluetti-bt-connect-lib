@@ -144,6 +144,7 @@ class DeviceReader:
             pack_registers = []
 
         parsed_data: dict = {}
+        failed = False
 
         self.logger.debug("Reading device registers")
 
@@ -186,16 +187,27 @@ class DeviceReader:
                             )
 
             except TimeoutError:
-                self.logger.warning("Timeout")
+                self.logger.warning(
+                    "No reply from the device to %s (%s) - dropping the connection",
+                    self._describe_request(),
+                    self._describe_connection(),
+                )
+                failed = True
                 return None
             except BleakError as err:
-                self.logger.warning("Bleak error: %s", err)
+                self.logger.warning(
+                    "Bluetooth error during %s: %s (%s)",
+                    self._describe_request(),
+                    err,
+                    self._describe_connection(),
+                )
+                failed = True
                 return None
             except BaseException as err:
                 self.logger.warning("Unknown error %s", err)
                 return None
             finally:
-                await self._close()
+                await self._close(drop=failed)
 
             if not parsed_data:
                 return None
@@ -287,6 +299,8 @@ class DeviceReader:
     ) -> WriteResult:
         """Send one write on the shared connection and interpret the reply."""
 
+        failed = False
+
         async with self.polling_lock:
             try:
                 async with asyncio.timeout(self.config.timeout):
@@ -301,10 +315,21 @@ class DeviceReader:
 
                     return self._interpret_write(field, value, command, response)
             except (TimeoutError, asyncio.TimeoutError):
-                self.logger.warning("Timeout writing %s", field)
+                self.logger.warning(
+                    "No reply writing %s (%s) - dropping the connection",
+                    field,
+                    self._describe_connection(),
+                )
+                failed = True
                 return WriteResult(WriteOutcome.NO_RESPONSE, field, value)
             except BleakError as err:
-                self.logger.warning("Bleak error writing %s: %s", field, err)
+                self.logger.warning(
+                    "Bluetooth error writing %s: %s (%s)",
+                    field,
+                    err,
+                    self._describe_connection(),
+                )
+                failed = True
                 return WriteResult(
                     WriteOutcome.FAILED, field, value, detail=f"bleak error: {err}"
                 )
@@ -314,7 +339,7 @@ class DeviceReader:
                     WriteOutcome.FAILED, field, value, detail=str(err)
                 )
             finally:
-                await self._close()
+                await self._close(drop=failed)
 
     def _interpret_write(
         self, field: str, value: Any, command: DeviceRegister, response: bytes
@@ -381,7 +406,8 @@ class DeviceReader:
 
         if self.connection is not None:
             if not await self.connection.ensure_connected():
-                self.logger.error("Shared connection unavailable")
+                # The connection has already logged why.
+                self.logger.debug("Shared connection unavailable")
                 return False
 
             self.client = self.connection.client
@@ -421,13 +447,22 @@ class DeviceReader:
 
         return True
 
-    async def _close(self) -> None:
-        """Release the connection, or hand it back if it is shared."""
+    async def _close(self, drop: bool = False) -> None:
+        """Release the connection, or hand it back if it is shared.
+
+        drop closes a shared connection at once instead of keeping it alive.
+        Used after the device stopped answering or the link failed: a reply
+        that turns up late would otherwise be taken as the answer to the next
+        request, and a fresh connection is the best chance of recovering.
+        """
 
         if self.connection is not None:
             self.connection.clear_data_callback()
             self.connection.set_disconnect_callback(None)
-            self.connection.schedule_disconnect(self.config.keep_alive_seconds)
+            if drop:
+                await self.connection.disconnect()
+            else:
+                self.connection.schedule_disconnect(self.config.keep_alive_seconds)
             return
 
         if self.has_notifier:
@@ -441,6 +476,29 @@ class DeviceReader:
         if self.client:
             await self.client.disconnect()
             self.logger.debug("Disconnected from device")
+
+    def _describe_request(self) -> str:
+        """The request in flight when something went wrong, for the log."""
+        register = self.current_registers
+        if register is None:
+            return "the first request"
+
+        slave = register.cmd[0]
+        if isinstance(register, ReadableRegisters):
+            return (
+                f"read {register.starting_address}+{register.quantity} "
+                f"at slave {slave}"
+            )
+        if isinstance(register, WriteableRegisters):
+            return f"write {register.address}+{len(register.values)} at slave {slave}"
+        if isinstance(register, WriteableRegister):
+            return f"write {register.address} at slave {slave}"
+        return repr(register)
+
+    def _describe_connection(self) -> str:
+        if self.connection is not None:
+            return self.connection.describe()
+        return "own connection"
 
     def _abandon_pending(self) -> None:
         """Fail a waiting command when the link drops underneath it."""
@@ -705,6 +763,9 @@ class DeviceReader:
         try:
             await self.client.write_gatt_char(WRITE_UUID, command_bytes)
 
+            if self.connection is not None:
+                self.connection.record_request()
+
             self.logger.debug("Request sent (%s)", registers)
 
             res = await asyncio.wait_for(self.notify_future, timeout=RESPONSE_TIMEOUT)
@@ -715,8 +776,10 @@ class DeviceReader:
         except (BleakError, asyncio.TimeoutError):
             # Connection-level failures - re-raise so the caller can abort
             # cleanly and disconnect, rather than continuing to attempt
-            # further register reads on an already-broken connection.
-            self.logger.warning("Error while reading data")
+            # further register reads on an already-broken connection. The
+            # caller logs it, knowing whether silence was expected (probe
+            # and raw reads) or means the link is in trouble.
+            self.logger.debug("No reply or Bluetooth error for %s", registers)
             raise
         except ModbusError as err:
             # Device explicitly rejected this register - log and move on.

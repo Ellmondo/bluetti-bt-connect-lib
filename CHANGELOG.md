@@ -2,6 +2,36 @@
 
 Newest first. Each section is also published as the GitHub release for that version.
 
+## 2.0.15 (2026-11-17)
+
+### Connection reliability
+
+Some BLUETTI devices, the EP2000's EBOX among them, can stop answering over
+Bluetooth after a long time connected and then refuse new connections until
+the EBOX is restarted. That fault is in BLUETTI's firmware and this release
+cannot prevent it. It tidies up how the library behaves around it and makes
+it easier to see. Reconnecting is unchanged: every poll still tries, so the
+first poll after an EBOX restart reconnects.
+
+- **A failed set-up no longer leaks the link.** If the connection was made
+  but subscribing to notifications failed, the link is now closed properly.
+  If the notify characteristic was missing, the cached services are cleared
+  so the next attempt reads them from the device again.
+- **A link that stops answering is dropped.** After a read or write gets no
+  reply, or hits a Bluetooth error, the connection is closed at once rather
+  than kept open. A late reply cannot then be mistaken for the answer to the
+  next request, and the next poll starts on a fresh connection.
+- **Clearer logs.** A missing reply is logged with the request that went
+  unanswered, how long the connection had been up and how many requests it
+  had carried, for example `No reply from the device to read 100+62 at slave
+  1 (connected 33h 12m, 81234 requests on this connection) - dropping the
+  connection`. A connection the device drops is logged the same way. A
+  failed connection is logged once, by the connection, with a count of
+  failures in a row; the reader no longer adds a second error for it.
+- **Connection statistics.** `DeviceConnection` now reports
+  `consecutive_failures`, `connect_count`, `connected_since` and
+  `requests_served`, for integrations to show.
+
 ## 2.0.14 (2026-11-05)
 
 ### One dependency fewer
